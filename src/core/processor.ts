@@ -15,11 +15,20 @@ import { selectModel } from "./router";
 import { shouldContinue } from "./context";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, appendFileSync } from "fs";
 import { join } from "path";
 
 const log = createLogger("core");
-const CODEX_OUT_DIR = join(config.tinyclawDir, "codex");
+const ACTIVITY_LOG = join(config.logsDir, "activity.log");
+
+function logActivity(backend: string, model: string | null, durationMs: number, status: string) {
+  try {
+    if (!existsSync(config.logsDir)) mkdirSync(config.logsDir, { recursive: true });
+    const ts = new Date().toISOString();
+    const entry = { ts, backend, model, durationMs, status };
+    appendFileSync(ACTIVITY_LOG, JSON.stringify(entry) + "\n");
+  } catch {}
+}
 const SOUL_PATH = join(config.projectDir, "SOUL.md");
 
 // Load SOUL.md once at startup — shared personality for all backends
@@ -74,6 +83,7 @@ async function processNext() {
 async function runClaude(message: string): Promise<string> {
   const model = selectModel(message);
   const continueFlag = shouldContinue();
+  const start = Date.now();
 
   log.info(`Model: ${model.model} (${model.reason}) | Continue: ${continueFlag}`);
 
@@ -92,7 +102,6 @@ async function runClaude(message: string): Promise<string> {
     stderr: "pipe",
   });
 
-  // Timeout: kill process if it takes too long
   const timeout = setTimeout(() => {
     log.warn(`Claude timed out after ${model.timeout}ms, killing process`);
     proc.kill();
@@ -103,9 +112,11 @@ async function runClaude(message: string): Promise<string> {
 
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
+  const duration = Date.now() - start;
 
   if (exitCode !== 0) {
     log.error(`Claude exited with code ${exitCode}: ${stderr.substring(0, 200)}`);
+    logActivity("claude", model.model, duration, `error:${exitCode}`);
     if (isRateLimit(stdout + stderr)) {
       return "Claude hit its rate limit. Try again in a few minutes.";
     }
@@ -113,6 +124,7 @@ async function runClaude(message: string): Promise<string> {
   }
 
   const response = stdout.trim();
+  logActivity("claude", model.model, duration, response ? "ok" : "empty");
 
   if (!response) {
     log.warn("Claude returned empty response");
@@ -128,14 +140,9 @@ async function runClaude(message: string): Promise<string> {
 
 export async function processWithCodex(message: string): Promise<string> {
   const continueFlag = shouldContinue();
+  const start = Date.now();
 
   log.info(`Codex | Continue: ${continueFlag}`);
-
-  if (!existsSync(CODEX_OUT_DIR)) {
-    mkdirSync(CODEX_OUT_DIR, { recursive: true });
-  }
-
-  const outFile = join(CODEX_OUT_DIR, `last_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`);
 
   const args: string[] = [];
 
@@ -145,7 +152,7 @@ export async function processWithCodex(message: string): Promise<string> {
     args.push("exec", "--dangerously-bypass-approvals-and-sandbox", "-C", config.projectDir);
   }
 
-  args.push("-o", outFile, withSoul(message));
+  args.push(withSoul(message));
 
   const proc = Bun.spawn(["codex", ...args], {
     cwd: config.projectDir,
@@ -161,20 +168,21 @@ export async function processWithCodex(message: string): Promise<string> {
   const exitCode = await proc.exited;
   clearTimeout(timeout);
 
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  const duration = Date.now() - start;
+
   if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
     log.error(`Codex exited with code ${exitCode}: ${stderr.substring(0, 200)}`);
+    logActivity("codex", null, duration, `error:${exitCode}`);
     return "Error processing with Codex. Please try again.";
   }
 
-  if (!existsSync(outFile)) {
-    log.warn("Codex returned no output file");
-    return "Codex returned an empty response.";
-  }
-
-  const response = readFileSync(outFile, "utf8").trim();
+  const response = stdout.trim();
+  logActivity("codex", null, duration, response ? "ok" : "empty");
 
   if (!response) {
+    log.warn("Codex returned empty response");
     return "Codex returned an empty response.";
   }
 

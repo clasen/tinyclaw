@@ -2,6 +2,7 @@
  * @module daemon/index
  * @role Entry point for the Daemon process.
  * @responsibilities
+ *   - Run interactive setup if config is missing
  *   - Start the Telegram channel adapter
  *   - Spawn Core process with --watch
  *   - Run HTTP server on :7778 for Core → Daemon pushes (scheduler)
@@ -11,14 +12,19 @@
  * @effects Network (Telegram, HTTP servers), spawns Core process
  */
 
-import { config } from "../shared/config";
-import { createLogger } from "../shared/logger";
-import { serveWithRetry, claimProcess, releaseProcess } from "../shared/ports";
-import { TelegramChannel } from "./channels/telegram";
-import { sendToCore } from "./bridge";
-import { startCore, stopCore } from "./lifecycle";
-import type { IncomingMessage, SendRequest } from "../shared/types";
-import { chunkMessage } from "../core/format";
+// Setup runs first — no config dependency, writes .env if needed
+import { runSetup } from "./setup";
+const ready = await runSetup();
+if (!ready) process.exit(1);
+
+// Dynamic imports so config loads AFTER setup has written .env
+const { config } = await import("../shared/config");
+const { createLogger } = await import("../shared/logger");
+const { serveWithRetry, claimProcess, releaseProcess } = await import("../shared/ports");
+const { TelegramChannel } = await import("./channels/telegram");
+const { sendToCore } = await import("./bridge");
+const { startCore, stopCore } = await import("./lifecycle");
+const { chunkMessage } = await import("../core/format");
 
 const log = createLogger("daemon");
 
@@ -28,11 +34,10 @@ claimProcess("daemon");
 // --- Channel setup ---
 const telegram = new TelegramChannel();
 
-telegram.onMessage(async (msg: IncomingMessage) => {
+telegram.onMessage(async (msg) => {
   try {
     const response = await sendToCore(msg);
 
-    // Send response back to channel
     const chunks = response.text.includes("---CHUNK---")
       ? response.text.split("\n---CHUNK---\n")
       : chunkMessage(response.text);
@@ -41,7 +46,6 @@ telegram.onMessage(async (msg: IncomingMessage) => {
       await telegram.send(msg.chatId, chunk);
     }
 
-    // Send any attached files
     if (response.files) {
       for (const filePath of response.files) {
         await telegram.sendFile(msg.chatId, filePath);
@@ -65,7 +69,7 @@ const pushServer = await serveWithRetry({
 
     if (url.pathname === "/send" && req.method === "POST") {
       try {
-        const body = (await req.json()) as SendRequest;
+        const body = await req.json() as { chatId: string; text: string; files?: string[] };
         if (!body.chatId || !body.text) {
           return Response.json({ error: "Missing chatId or text" }, { status: 400 });
         }

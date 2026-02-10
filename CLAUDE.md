@@ -1,8 +1,4 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## What is TinyClaw
+# What is TinyClaw v2
 
 TinyClaw v2 is a Bun + TypeScript system that connects Telegram to Claude Code via a two-process architecture: **Daemon** (stable channel I/O) and **Core** (message processing, media, scheduling, Claude CLI with model routing).
 

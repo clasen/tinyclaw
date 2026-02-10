@@ -12,10 +12,8 @@
 import type { ModelConfig } from "../shared/types";
 
 const HAIKU_PATTERNS = [
-  /^\s*(avisame|recordame)\s+en\s+/i,
-  /^\s*\/cron\s+/i,
   /^\s*\/reset\s*$/i,
-  /^\s*(si|no|ok|dale|listo|gracias|genial|perfecto)\s*[.!]?\s*$/i,
+  /^\s*(si|no|ok|dale|listo|gracias|genial|perfecto|yes|yeah|nope|thanks|cool|great)\s*[.!]?\s*$/i,
 ];
 
 const OPUS_PATTERNS = [

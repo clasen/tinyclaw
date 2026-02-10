@@ -2,13 +2,11 @@
  * @module core/scheduler
  * @role Manage cron and one-time scheduled tasks using croner.
  * @responsibilities
- *   - Parse relative reminders ("avisame en 5 minutos")
- *   - Parse cron requests ("/cron * * * * * message")
  *   - Persist tasks to tasks.json, restore on startup
  *   - Execute tasks by POSTing to Daemon's /send endpoint
+ *   - Schedule one-time (setTimeout) and recurring (croner) tasks
  * @dependencies croner, shared/config, shared/types
  * @effects Disk I/O (tasks.json), network (POST to Daemon), timers
- * @contract initScheduler() => void, addTask(task) => void
  */
 
 import { Cron } from "croner";
@@ -70,7 +68,6 @@ function scheduleTask(task: ScheduledTask) {
     if (task.status === "done") return;
     const delay = (task.runAt || 0) - Date.now();
     if (delay <= 0) {
-      // Already past due, execute immediately
       executeTask(task).then(() => {
         task.status = "done";
         task.lastRunAt = Date.now();
@@ -113,7 +110,6 @@ export function initScheduler() {
     return true;
   });
 
-  // Schedule all active tasks
   for (const task of tasks) {
     scheduleTask(task);
   }
@@ -126,44 +122,4 @@ export function addTask(task: ScheduledTask) {
   scheduleTask(task);
   saveTasks();
   log.info(`Added task ${task.id} (${task.type})`);
-}
-
-export function stripDiacritics(text: string): string {
-  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
-export function parseRelativeReminder(text: string): { delayMs: number; amount: number; unit: string; reminderText: string } | null {
-  const normalized = stripDiacritics(text.toLowerCase());
-  const regex = /^\s*(avisame|recordame)\s+en\s+(\d+)\s*(segundo|segundos|minuto|minutos|hora|horas)\s*(.*)$/i;
-  const match = normalized.match(regex);
-  if (!match) return null;
-
-  const amount = parseInt(match[2], 10);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
-
-  const unit = match[3];
-  let ms = 0;
-  if (unit.startsWith("segundo")) ms = amount * 1000;
-  if (unit.startsWith("minuto")) ms = amount * 60 * 1000;
-  if (unit.startsWith("hora")) ms = amount * 60 * 60 * 1000;
-
-  const trailing = match[4] ? match[4].trim() : "";
-  let reminderText = "";
-  if (trailing) {
-    const cleaned = trailing.replace(/^[:,-]\s*/g, "").replace(/^(que|para)\s+/g, "");
-    reminderText = cleaned.trim();
-  }
-
-  return { delayMs: ms, amount, unit, reminderText };
-}
-
-export function parseCronRequest(text: string): { cron: string; message: string } | null {
-  const normalized = stripDiacritics(text.trim().toLowerCase());
-  if (!(normalized.startsWith("cron ") || normalized.startsWith("/cron "))) return null;
-  const tokens = text.trim().split(/\s+/);
-  if (tokens.length < 7) return null;
-  const expr = tokens.slice(1, 6).join(" ");
-  const message = tokens.slice(6).join(" ").trim();
-  if (!message) return null;
-  return { cron: expr, message };
 }

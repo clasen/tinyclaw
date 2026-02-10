@@ -21,13 +21,8 @@ import { detectFiles } from "./file-detector";
 import { chunkMessage } from "./format";
 import { addExchange, getForeignContext } from "./history";
 import { getOnboarding, checkDeps } from "./onboarding";
-import {
-  initScheduler,
-  addTask,
-  parseRelativeReminder,
-  parseCronRequest,
-  stripDiacritics,
-} from "./scheduler";
+import { initScheduler, addTask } from "./scheduler";
+import { detectScheduleIntent } from "./intent";
 
 const log = createLogger("core");
 
@@ -163,50 +158,28 @@ const server = await serveWithRetry({
           return Response.json(response);
         }
 
-        // Check for scheduler commands before sending to Claude
-        const cronRequest = parseCronRequest(messageText);
-        const isCronCommand = stripDiacritics(messageText.trim().toLowerCase()).startsWith("/cron ");
-
-        if (cronRequest) {
+        // Detect scheduling intent via haiku (language-agnostic)
+        const scheduleIntent = await detectScheduleIntent(messageText);
+        if (scheduleIntent) {
           const taskId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
           const task: ScheduledTask = {
             id: taskId,
             chatId: msg.chatId,
             sender: msg.sender,
             senderId: msg.senderId,
-            type: "cron",
-            cron: cronRequest.cron,
-            message: `Recordatorio programado (cron): ${cronRequest.message}`,
+            type: scheduleIntent.type,
+            message: scheduleIntent.message,
             originalMessage: messageText,
             createdAt: Date.now(),
+            ...(scheduleIntent.type === "once" && scheduleIntent.delaySeconds
+              ? { runAt: Date.now() + scheduleIntent.delaySeconds * 1000 }
+              : {}),
+            ...(scheduleIntent.type === "cron" && scheduleIntent.cron
+              ? { cron: scheduleIntent.cron }
+              : {}),
           };
           addTask(task);
-          const response: CoreResponse = { text: `Cron registrado: ${cronRequest.cron}` };
-          return Response.json(response);
-        }
-
-        if (isCronCommand) {
-          const response: CoreResponse = { text: "Formato: /cron <min> <hora> <diaMes> <mes> <diaSemana> <mensaje>" };
-          return Response.json(response);
-        }
-
-        const reminder = parseRelativeReminder(messageText);
-        if (reminder) {
-          const reminderText = reminder.reminderText || `Aviso solicitado hace ${reminder.amount} ${reminder.unit}`;
-          const taskId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-          const task: ScheduledTask = {
-            id: taskId,
-            chatId: msg.chatId,
-            sender: msg.sender,
-            senderId: msg.senderId,
-            type: "once",
-            runAt: Date.now() + reminder.delayMs,
-            message: `Recordatorio: ${reminderText}`,
-            originalMessage: messageText,
-            createdAt: Date.now(),
-          };
-          addTask(task);
-          const response: CoreResponse = { text: `Listo. Te aviso en ${reminder.amount} ${reminder.unit}.` };
+          const response: CoreResponse = { text: scheduleIntent.confirmation };
           return Response.json(response);
         }
 
