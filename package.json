@@ -1,0 +1,16 @@
+{
+  "name": "tinyclaw",
+  "version": "1.0.0",
+  "description": "TinyClaw with WhatsApp and Telegram integration",
+  "main": "whatsapp-client.js",
+  "scripts": {
+    "whatsapp": "node whatsapp-client.js",
+    "telegram": "node telegram-client.js"
+  },
+  "dependencies": {
+    "grammy": "^1.21.0",
+    "openai": "^6.19.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.23.0"
+  }
+}
