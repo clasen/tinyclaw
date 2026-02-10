@@ -126,22 +126,24 @@ export async function addTask(task: ScheduledTask) {
   log.info(`Added task ${task.id} (${task.type})`);
 }
 
-export async function cancelRecurringTasks(chatId: string): Promise<number> {
+export async function cancelAllChatTasks(chatId: string): Promise<number> {
   let removed = 0;
   for (let i = tasks.length - 1; i >= 0; i -= 1) {
     const task = tasks[i];
-    if (task.chatId === chatId && task.type === "cron" && task.origin === "recurring") {
-      const job = activeJobs.get(task.id);
-      if (job && "stop" in job && typeof job.stop === "function") {
-        job.stop();
-      } else if (job) {
-        clearTimeout(job as ReturnType<typeof setTimeout>);
-      }
-      activeJobs.delete(task.id);
-      await deleteTask(task.id);
-      tasks.splice(i, 1);
-      removed += 1;
+    if (task.chatId !== chatId) continue;
+    // Skip already-completed one-time tasks
+    if (task.type === "once" && task.status === "done") continue;
+
+    const job = activeJobs.get(task.id);
+    if (job && "stop" in job && typeof job.stop === "function") {
+      job.stop();
+    } else if (job) {
+      clearTimeout(job as ReturnType<typeof setTimeout>);
     }
+    activeJobs.delete(task.id);
+    await deleteTask(task.id);
+    tasks.splice(i, 1);
+    removed += 1;
   }
   return removed;
 }

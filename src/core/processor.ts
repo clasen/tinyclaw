@@ -12,6 +12,7 @@
  */
 
 import { selectModel } from "./router";
+import { getRecentHistory } from "./history";
 import { shouldContinue } from "./context";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
@@ -47,16 +48,17 @@ function withSoul(message: string): string {
   return `[System instructions]\n${soulPrompt}\n[End system instructions]\n\n${message}`;
 }
 
-// Serialize Claude calls — only one at a time for -c flag consistency
+// Serialize Claude calls — only one at a time
 let processing = false;
 const queue: Array<{
   message: string;
+  chatId: string;
   resolve: (result: string) => void;
 }> = [];
 
-export async function processWithClaude(message: string): Promise<string> {
+export async function processWithClaude(message: string, chatId: string): Promise<string> {
   return new Promise((resolve) => {
-    queue.push({ message, resolve });
+    queue.push({ message, chatId, resolve });
     processNext();
   });
 }
@@ -65,10 +67,10 @@ async function processNext() {
   if (processing || queue.length === 0) return;
   processing = true;
 
-  const { message, resolve } = queue.shift()!;
+  const { message, chatId, resolve } = queue.shift()!;
 
   try {
-    const result = await runClaude(message);
+    const result = await runClaude(message, chatId);
     resolve(result);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -80,21 +82,18 @@ async function processNext() {
   }
 }
 
-async function runClaude(message: string): Promise<string> {
+async function runClaude(message: string, chatId: string): Promise<string> {
   const model = selectModel(message);
-  const continueFlag = shouldContinue();
+  const historyContext = getRecentHistory(chatId);
   const start = Date.now();
 
-  log.info(`Model: ${model.model} (${model.reason}) | Continue: ${continueFlag}`);
+  const historyCount = historyContext ? historyContext.split("\nUser: ").length - 1 : 0;
+  log.info(`Model: ${model.model} (${model.reason}) | History: ${historyCount} exchanges`);
 
   const args = ["--dangerously-skip-permissions"];
 
-  if (continueFlag) {
-    args.push("-c");
-  }
-
   args.push("--model", model.model);
-  args.push("-p", withSoul(message));
+  args.push("-p", withSoul(historyContext + message));
 
   const proc = Bun.spawn(["claude", ...args], {
     cwd: config.projectDir,

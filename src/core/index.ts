@@ -19,9 +19,9 @@ import { processWithClaude, processWithCodex } from "./processor";
 import { transcribeAudio, describeImage, isMediaConfigured } from "./media";
 import { detectFiles } from "./file-detector";
 
-import { addExchange, getForeignContext } from "./history";
+import { addExchange, getForeignContext, clearHistory } from "./history";
 import { getOnboarding, checkDeps } from "./onboarding";
-import { initScheduler, addTask } from "./scheduler";
+import { initScheduler, addTask, cancelAllChatTasks } from "./scheduler";
 import { detectScheduleIntent } from "./intent";
 import { initAuth, isAuthorized, tryAuthorize } from "./auth";
 import { initAttachments, saveAttachment } from "./attachments";
@@ -126,6 +126,7 @@ ${messageText}`;
         if (msg.command === "/reset") {
           const { writeFileSync } = await import("fs");
           writeFileSync(config.resetFlagPath, "reset");
+          clearHistory(msg.chatId);
           const { resetRouterState } = await import("./router");
           resetRouterState();
           const response: CoreResponse = { text: "Conversation reset! Next message will start a fresh conversation." };
@@ -252,6 +253,14 @@ ${messageText}`;
         // Detect scheduling intent via haiku (language-agnostic)
         const scheduleIntent = await detectScheduleIntent(messageText);
         if (scheduleIntent) {
+          if (scheduleIntent.type === "cancel") {
+            const removed = await cancelAllChatTasks(msg.chatId);
+            const text = removed > 0
+              ? scheduleIntent.confirmation
+              : "No active tasks to cancel.";
+            return Response.json({ text } as CoreResponse);
+          }
+
           const taskId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
           const task: ScheduledTask = {
             id: taskId,
@@ -290,13 +299,13 @@ ${messageText}`;
             agentResponse = await processWithCodex(enrichedMessage);
             if (agentResponse.startsWith("Error processing with Codex") && canFallback) {
               log.warn("Codex failed, falling back to Claude");
-              agentResponse = await processWithClaude(enrichedMessage);
+              agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
               usedBackend = "claude";
             }
           } catch (error) {
             if (canFallback) {
               log.warn(`Codex threw, falling back to Claude: ${error}`);
-              agentResponse = await processWithClaude(enrichedMessage);
+              agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
               usedBackend = "claude";
             } else {
               agentResponse = "Error processing with Codex. Please try again.";
@@ -304,7 +313,7 @@ ${messageText}`;
           }
         } else {
           try {
-            agentResponse = await processWithClaude(enrichedMessage);
+            agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
           } catch (error) {
             if (canFallback) {
               log.warn(`Claude threw, falling back to Codex: ${error}`);

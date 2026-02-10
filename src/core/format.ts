@@ -15,6 +15,16 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function protectTelegramHtmlTags(text: string): { text: string; tags: string[] } {
+  const tags: string[] = [];
+  const tagPattern = /<\/?(?:b|i|u|s|code|pre|blockquote)>|<a\s+href="[^"]+">|<\/a>/gi;
+  const protectedText = text.replace(tagPattern, (tag) => {
+    tags.push(tag);
+    return `\x00HTMLTAG${tags.length - 1}\x00`;
+  });
+  return { text: protectedText, tags };
+}
+
 /**
  * Convert Markdown (from Claude CLI) to Telegram-safe HTML.
  * Telegram supports: <b>, <i>, <code>, <pre>, <a>, <s>, <u>, <blockquote>
@@ -26,8 +36,11 @@ export function markdownToTelegramHtml(text: string): string {
   const inlineCodes: string[] = [];
   const links: string[] = [];
 
+  // Preserve already-valid Telegram HTML tags instead of escaping them.
+  const protectedHtml = protectTelegramHtmlTags(text);
+
   // Protect fenced code blocks: ```lang\n...\n``` or ```...```
-  let result = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, _lang, code) => {
+  let result = protectedHtml.text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, _lang, code) => {
     codeBlocks.push(code.trimEnd());
     return `\x00CODEBLOCK${codeBlocks.length - 1}\x00`;
   });
@@ -68,6 +81,7 @@ export function markdownToTelegramHtml(text: string): string {
   result = result.replace(/\x00CODEBLOCK(\d+)\x00/g, (_m, i) => `<pre>${escapeHtml(codeBlocks[+i])}</pre>`);
   result = result.replace(/\x00INLINE(\d+)\x00/g, (_m, i) => `<code>${escapeHtml(inlineCodes[+i])}</code>`);
   result = result.replace(/\x00LINK(\d+)\x00/g, (_m, i) => links[+i]);
+  result = result.replace(/\x00HTMLTAG(\d+)\x00/g, (_m, i) => protectedHtml.tags[+i]);
 
   return result;
 }

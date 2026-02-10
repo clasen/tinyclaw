@@ -112,3 +112,53 @@ export function getForeignContext(
 
   return `[Contexto previo con ${otherName}]\n${lines}\n[Fin del contexto previo]\n\n`;
 }
+
+/**
+ * Returns recent conversation history for this chat, formatted as User/Assistant pairs.
+ * Trims oldest entries first if total exceeds maxChars.
+ * Returns "" for new conversations.
+ */
+export function getRecentHistory(
+  chatId: string,
+  limit = 10,
+  maxChars = 8000,
+): string {
+  const chatHistory = history.filter((e) => e.chatId === chatId);
+  if (chatHistory.length === 0) return "";
+
+  const recent = chatHistory.slice(-limit);
+
+  // Format exchanges
+  const formatted = recent.map(
+    (e) => `User: ${e.user}\nAssistant: ${e.response}`,
+  );
+
+  // Trim oldest entries if total exceeds maxChars
+  let total = formatted.join("\n\n").length;
+  while (formatted.length > 1 && total > maxChars) {
+    formatted.shift();
+    total = formatted.join("\n\n").length;
+  }
+
+  if (formatted.length === 0) return "";
+
+  return `[Conversation history]\n${formatted.join("\n\n")}\n[End of conversation history]\n\n`;
+}
+
+/**
+ * Removes all history entries for this chat from memory and disk.
+ */
+export function clearHistory(chatId: string): void {
+  const before = history.length;
+  history = history.filter((e) => e.chatId !== chatId);
+  const removed = before - history.length;
+
+  if (removed > 0) {
+    log.info(`Cleared ${removed} history entries for chat ${chatId}`);
+    try {
+      writeFileSync(HISTORY_PATH, history.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    } catch (e) {
+      log.warn(`Failed to persist history after clear: ${e}`);
+    }
+  }
+}

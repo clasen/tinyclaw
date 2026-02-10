@@ -15,14 +15,14 @@ import { createLogger } from "../shared/logger";
 const log = createLogger("core");
 
 export interface ScheduleIntent {
-  type: "once" | "cron";
+  type: "once" | "cron" | "cancel";
   delaySeconds?: number;
   cron?: string;
   message: string;
   confirmation: string;
 }
 
-const INTENT_PROMPT = `You are a scheduling intent detector. Analyze the user message and determine if they want to schedule a reminder or recurring notification.
+const INTENT_PROMPT = `You are a scheduling intent detector. Analyze the user message and determine if they want to schedule a reminder, recurring notification, or cancel/stop existing tasks.
 
 If it IS a scheduling request, respond with ONLY this JSON (no markdown, no explanation):
 For one-time reminders:
@@ -31,12 +31,16 @@ For one-time reminders:
 For recurring reminders:
 {"type":"cron","cron":"*/5 * * * *","message":"the reminder text","confirmation":"I'll remind you every 5 minutes"}
 
-If it is NOT a scheduling request, respond with ONLY:
+For cancelling/stopping tasks:
+{"type":"cancel","message":"","confirmation":"All tasks cancelled."}
+
+If it is NOT a scheduling or cancellation request, respond with ONLY:
 {"type":"none"}
 
 Rules:
 - One-time: "in X seconds/minutes/hours" or equivalent in any language → once
 - Recurring: "every X seconds/minutes/hours" or equivalent in any language → cron
+- Cancel: "stop/cancel/remove all tasks/reminders" or equivalent in any language → cancel
 - For seconds-based cron, use 6-field format: */N * * * * *
 - For minutes-based cron: */N * * * *
 - For hours-based cron: 0 */N * * *
@@ -95,7 +99,7 @@ export async function detectScheduleIntent(message: string): Promise<ScheduleInt
 
       const parsed = JSON.parse(jsonMatch[0]);
       if (parsed.type === "none") return null;
-      if (parsed.type !== "once" && parsed.type !== "cron") return null;
+      if (parsed.type !== "once" && parsed.type !== "cron" && parsed.type !== "cancel") return null;
 
       return parsed as ScheduleIntent;
     } catch (e) {
