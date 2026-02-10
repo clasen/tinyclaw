@@ -13,13 +13,12 @@ import type { ModelConfig } from "../shared/types";
 
 const HAIKU_PATTERNS = [
   /^\s*\/reset\s*$/i,
-  /^\s*(si|no|ok|dale|listo|gracias|genial|perfecto|yes|yeah|nope|thanks|cool|great)\s*[.!]?\s*$/i,
+  /^\s*\S{1,12}\s*[.!]?\s*$/i, // Single short word replies (ok, yes, thanks, dale, etc.)
 ];
 
 const OPUS_PATTERNS = [
-  /\b(cambi[aá]|modific[aá]|refactore[aá]|arregl[aá]|implement[aá]|cre[aá]|escrib[ií]|agreg[aá]|elimin[aá]|borr[aá]|mové|mov[eé]|renombr[aá])\b/i,
   /\b(debug|fix|bug|error|refactor|deploy|architect|migration)\b/i,
-  /\b(código|code|archivo|file|función|function|clase|class|módulo|module)\b/i,
+  /\b(code|file|function|class|module|component|endpoint|api)\b/i,
   /```[\s\S]*```/,
 ];
 

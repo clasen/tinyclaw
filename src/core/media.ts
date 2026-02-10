@@ -59,8 +59,8 @@ export async function describeImage(base64: string, caption?: string): Promise<s
   const client = getClient();
 
   const prompt = caption
-    ? `El usuario envió esta imagen con el texto: "${caption}". Describí detalladamente lo que ves en la imagen y respondé considerando el texto adjunto.`
-    : "Describí detalladamente lo que ves en esta imagen.";
+    ? `The user sent this image with the text: "${caption}". Describe in detail what you see and respond considering the attached text.`
+    : "Describe in detail what you see in this image.";
 
   const response = await client.chat.completions.create({
     model: "gpt-5.2",

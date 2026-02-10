@@ -26,22 +26,22 @@ const INTENT_PROMPT = `You are a scheduling intent detector. Analyze the user me
 
 If it IS a scheduling request, respond with ONLY this JSON (no markdown, no explanation):
 For one-time reminders:
-{"type":"once","delaySeconds":300,"message":"the reminder text","confirmation":"Te aviso en 5 minutos"}
+{"type":"once","delaySeconds":300,"message":"the reminder text","confirmation":"I'll remind you in 5 minutes"}
 
 For recurring reminders:
-{"type":"cron","cron":"*/5 * * * *","message":"the reminder text","confirmation":"Te aviso cada 5 minutos"}
+{"type":"cron","cron":"*/5 * * * *","message":"the reminder text","confirmation":"I'll remind you every 5 minutes"}
 
 If it is NOT a scheduling request, respond with ONLY:
 {"type":"none"}
 
 Rules:
-- "in X seconds/minutes/hours", "en X segundos/minutos/horas", etc → once
-- "every X seconds/minutes/hours", "cada X segundos/minutos/horas", etc → cron
+- One-time: "in X seconds/minutes/hours" or equivalent in any language → once
+- Recurring: "every X seconds/minutes/hours" or equivalent in any language → cron
 - For seconds-based cron, use 6-field format: */N * * * * *
 - For minutes-based cron: */N * * * *
 - For hours-based cron: 0 */N * * *
 - Extract the actual reminder content, not the scheduling instruction
-- Write the confirmation message in the same language as the user
+- Write the confirmation in the same language as the user's message
 - Support any language
 - Only detect clear scheduling intent, not vague mentions of time`;
 

@@ -23,6 +23,7 @@ import { addExchange, getForeignContext } from "./history";
 import { getOnboarding, checkDeps } from "./onboarding";
 import { initScheduler, addTask } from "./scheduler";
 import { detectScheduleIntent } from "./intent";
+import { initAuth, isAuthorized, tryAuthorize } from "./auth";
 
 const log = createLogger("core");
 
@@ -41,7 +42,8 @@ function getBackend(chatId: string): "claude" | "codex" {
   return backendState.get(chatId) || defaultBackend();
 }
 
-// Initialize scheduler
+// Initialize auth + scheduler
+initAuth();
 initScheduler();
 
 const server = await serveWithRetry({
@@ -63,6 +65,14 @@ const server = await serveWithRetry({
         }
 
         log.info(`Message from ${msg.sender}: ${(msg.text || "[media]").substring(0, 60)}`);
+
+        // Auth gate: require token before anything else
+        if (!isAuthorized(msg.chatId)) {
+          if (msg.text && tryAuthorize(msg.chatId, msg.text)) {
+            return Response.json({ text: "Authorized. Welcome to TinyClaw!" } as CoreResponse);
+          }
+          return Response.json({ text: "Send the auth token to start. Check the server console." } as CoreResponse);
+        }
 
         // Onboarding: first message from this chat
         const onboarding = getOnboarding(msg.chatId);
@@ -88,11 +98,11 @@ const server = await serveWithRetry({
             const hint = deps.os === "macOS"
               ? "<code>npm install -g @openai/codex</code>"
               : "<code>npm install -g @openai/codex</code>";
-            return Response.json({ text: `Codex CLI no está instalado.\n${hint}` } as CoreResponse);
+            return Response.json({ text: `Codex CLI is not installed.\n${hint}` } as CoreResponse);
           }
           backendState.set(msg.chatId, "codex");
           log.info(`Backend switched to codex for chat ${msg.chatId}`);
-          const response: CoreResponse = { text: "Modo Codex activado. Todos los mensajes van a Codex (fallback a Claude si falla).\nUsá /claude para volver." };
+          const response: CoreResponse = { text: "Codex mode activated. Use /claude to switch back." };
           return Response.json(response);
         }
 
@@ -103,53 +113,58 @@ const server = await serveWithRetry({
             const hint = deps.os === "macOS"
               ? "<code>brew install claude-code</code> o <code>npm install -g @anthropic-ai/claude-code</code>"
               : "<code>npm install -g @anthropic-ai/claude-code</code>";
-            return Response.json({ text: `Claude CLI no está instalado.\n${hint}` } as CoreResponse);
+            return Response.json({ text: `Claude CLI is not installed.\n${hint}` } as CoreResponse);
           }
           backendState.set(msg.chatId, "claude");
           log.info(`Backend switched to claude for chat ${msg.chatId}`);
-          const response: CoreResponse = { text: "Modo Claude activado." };
+          const response: CoreResponse = { text: "Claude mode activated. Use /codex to switch back." };
           return Response.json(response);
         }
 
         // Process media first
 
         if (msg.audio) {
-          if (!isMediaConfigured()) {
-            const response: CoreResponse = { text: "Voice messages not enabled. OPENAI_API_KEY not configured." };
-            return Response.json(response);
-          }
-          try {
-            const transcription = await transcribeAudio(msg.audio.base64, msg.audio.filename);
-            if (!transcription.trim()) {
-              const response: CoreResponse = { text: "Could not understand the audio (empty result). Try again." };
-              return Response.json(response);
+          if (isMediaConfigured()) {
+            try {
+              const transcription = await transcribeAudio(msg.audio.base64, msg.audio.filename);
+              if (transcription.trim()) {
+                messageText = `[Voice message transcription]: ${transcription}`;
+              } else {
+                messageText = `[The user sent a voice message but transcription returned empty. Ask them to try again or send text.]`;
+              }
+            } catch (error) {
+              log.error(`Transcription failed: ${error}`);
+              messageText = `[The user sent a voice message but transcription failed. Ask them to try again or send text.]`;
             }
-            messageText = `[Voice message transcription]: ${transcription}`;
-          } catch (error) {
-            log.error(`Transcription failed: ${error}`);
-            const response: CoreResponse = { text: "Could not transcribe the audio. Try with a text message." };
-            return Response.json(response);
+          } else {
+            messageText = `[The user sent a voice message but it cannot be transcribed because OPENAI_API_KEY is not configured. Let them know and ask them to send text instead.]`;
           }
         }
 
         if (msg.image) {
-          if (!isMediaConfigured()) {
-            const response: CoreResponse = { text: "Images not enabled. OPENAI_API_KEY not configured." };
-            return Response.json(response);
-          }
-          try {
-            const description = await describeImage(msg.image.base64, msg.image.caption);
-            if (!description.trim()) {
-              const response: CoreResponse = { text: "Could not analyze the image (empty result). Try again." };
-              return Response.json(response);
+          const caption = msg.image.caption || "";
+          if (isMediaConfigured()) {
+            try {
+              const description = await describeImage(msg.image.base64, caption);
+              if (description.trim()) {
+                messageText = caption
+                  ? `[Image attached with text: "${caption}"]\n[Image description: ${description}]`
+                  : `[Image attached]\n[Image description: ${description}]`;
+              } else {
+                messageText = caption
+                  ? `[Image attached with text: "${caption}"]\n[Image content could not be interpreted]`
+                  : `[Image attached]\n[Image content could not be interpreted]`;
+              }
+            } catch (error) {
+              log.error(`Image analysis failed: ${error}`);
+              messageText = caption
+                ? `[Image attached with text: "${caption}"]\n[Error analyzing the image]`
+                : `[Image attached]\n[Error analyzing the image]`;
             }
-            messageText = msg.image.caption
-              ? `[Imagen adjunta con texto: "${msg.image.caption}"]\n[Descripción de la imagen: ${description}]`
-              : `[Imagen adjunta]\n[Descripción de la imagen: ${description}]`;
-          } catch (error) {
-            log.error(`Image analysis failed: ${error}`);
-            const response: CoreResponse = { text: "Could not process the image. Try again." };
-            return Response.json(response);
+          } else {
+            messageText = caption
+              ? `[Image attached with text: "${caption}"]\n[Cannot interpret the image because OPENAI_API_KEY is not configured. Respond based on the user's text.]`
+              : `[Image attached without text]\n[Cannot interpret the image because OPENAI_API_KEY is not configured. Let the user know you can't see images, but ask how you can help.]`;
           }
         }
 

@@ -65,4 +65,5 @@ export interface Channel {
   onMessage(handler: (msg: IncomingMessage) => void): void;
   send(chatId: string, text: string, parseMode?: "HTML" | "plain"): Promise<void>;
   sendFile(chatId: string, filePath: string): Promise<void>;
+  sendTyping(chatId: string): Promise<void>;
 }

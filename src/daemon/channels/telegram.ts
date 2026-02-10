@@ -93,7 +93,7 @@ export class TelegramChannel implements Channel {
         });
       } catch (error) {
         log.error(`Voice download error: ${error}`);
-        await ctx.reply("No se pudo descargar el audio. Intentá de nuevo.");
+        await ctx.reply("Could not download the audio. Try again.");
       }
     });
 
@@ -124,7 +124,7 @@ export class TelegramChannel implements Channel {
         });
       } catch (error) {
         log.error(`Photo download error: ${error}`);
-        await ctx.reply("No se pudo descargar la imagen. Intentá de nuevo.");
+        await ctx.reply("Could not download the image. Try again.");
       }
     });
 
@@ -167,6 +167,14 @@ export class TelegramChannel implements Channel {
     } catch (error) {
       log.error(`File send error: ${error}`);
       throw error;
+    }
+  }
+
+  async sendTyping(chatId: string): Promise<void> {
+    try {
+      await this.bot.api.sendChatAction(chatId, "typing");
+    } catch {
+      // Non-critical — ignore
     }
   }
 

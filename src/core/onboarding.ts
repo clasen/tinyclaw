@@ -88,8 +88,8 @@ export function getOnboarding(chatId: string): { message: string; blocking: bool
   // No CLI at all — block
   if (!deps.claude && !deps.codex) {
     const lines = [
-      "<b>Bienvenido a TinyClaw!</b>\n",
-      "No encontré ni Claude CLI ni Codex CLI. Necesitás al menos uno.\n",
+      "<b>Welcome to TinyClaw!</b>\n",
+      "Neither Claude CLI nor Codex CLI found. You need at least one.\n",
     ];
     if (deps.os === "macOS") {
       lines.push("Claude: <code>brew install claude-code</code>");
@@ -97,7 +97,7 @@ export function getOnboarding(chatId: string): { message: string; blocking: bool
       lines.push("Claude: <code>npm install -g @anthropic-ai/claude-code</code>");
     }
     lines.push("Codex: <code>npm install -g @openai/codex</code>\n");
-    lines.push("Instalá uno y volvé a escribirme.");
+    lines.push("Install one and message me again.");
     return { message: lines.join("\n"), blocking: true };
   }
 
@@ -105,18 +105,18 @@ export function getOnboarding(chatId: string): { message: string; blocking: bool
   markOnboarded(chatId);
 
   const using = deps.claude ? "Claude" : "Codex";
-  const lines = [`<b>TinyClaw</b> — usando <b>${using}</b>`];
+  const lines = [`<b>TinyClaw</b> — using <b>${using}</b>`];
 
   if (!deps.claude) {
-    lines.push("Claude CLI no instalado. Podés agregarlo con <code>npm install -g @anthropic-ai/claude-code</code>");
+    lines.push("Claude CLI not installed. Add it with <code>npm install -g @anthropic-ai/claude-code</code>");
   } else if (!deps.codex) {
-    lines.push("Codex CLI no instalado. Podés agregarlo con <code>npm install -g @openai/codex</code>");
+    lines.push("Codex CLI not installed. Add it with <code>npm install -g @openai/codex</code>");
   } else {
-    lines.push("Usá /codex o /claude para cambiar de backend.");
+    lines.push("Use /codex or /claude to switch backend.");
   }
 
   if (!deps.openaiKey) {
-    lines.push("Sin OpenAI API key — audios e imágenes deshabilitados. Agregá <code>OPENAI_API_KEY</code> en <code>.tinyclaw/.env</code> si los querés.");
+    lines.push("No OpenAI API key — voice and image processing disabled. Add <code>OPENAI_API_KEY</code> to <code>.tinyclaw/.env</code> to enable.");
   }
 
   return { message: lines.join("\n"), blocking: false };

@@ -35,8 +35,12 @@ claimProcess("daemon");
 const telegram = new TelegramChannel();
 
 telegram.onMessage(async (msg) => {
+  // Keep typing indicator alive while Core processes (expires every ~5s)
+  const typingInterval = setInterval(() => telegram.sendTyping(msg.chatId), 4000);
+
   try {
     const response = await sendToCore(msg);
+    clearInterval(typingInterval);
 
     const chunks = response.text.includes("---CHUNK---")
       ? response.text.split("\n---CHUNK---\n")
@@ -52,6 +56,7 @@ telegram.onMessage(async (msg) => {
       }
     }
   } catch (error) {
+    clearInterval(typingInterval);
     log.error(`Failed to process message from ${msg.sender}: ${error}`);
     try {
       await telegram.send(msg.chatId, "Error processing your message. Please try again.", "plain");
