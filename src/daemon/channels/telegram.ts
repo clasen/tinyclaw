@@ -59,13 +59,27 @@ export class TelegramChannel implements Channel {
       log.info(`${command ? `Cmd ${command}` : "Text"} from ${ctx.from!.first_name}: ${text.substring(0, 60)}`);
       if (!command) await ctx.api.sendChatAction(ctx.chat.id, "typing");
 
+      // Capture reply_to_message if present
+      let replyTo: IncomingMessage["replyTo"];
+      if (ctx.message.reply_to_message) {
+        const reply = ctx.message.reply_to_message;
+        replyTo = {
+          messageId: reply.message_id,
+          text: "text" in reply ? reply.text : undefined,
+          sender: reply.from ? this.getSenderName({ from: reply.from }) : "Unknown",
+          timestamp: reply.date * 1000,
+        };
+      }
+
       this.handler?.({
         chatId: String(ctx.chat.id),
         sender: this.getSenderName(ctx),
         senderId: String(ctx.from!.id),
         text,
         command,
+        messageId: ctx.message.message_id,
         timestamp: Date.now(),
+        replyTo,
       });
     });
 
@@ -76,6 +90,18 @@ export class TelegramChannel implements Channel {
       const voice = ctx.message.voice;
       log.info(`Voice from ${ctx.from!.first_name} (${voice.duration}s)`);
       await ctx.api.sendChatAction(ctx.chat.id, "typing");
+
+      // Capture reply_to_message if present
+      let replyTo: IncomingMessage["replyTo"];
+      if (ctx.message.reply_to_message) {
+        const reply = ctx.message.reply_to_message;
+        replyTo = {
+          messageId: reply.message_id,
+          text: "text" in reply ? reply.text : undefined,
+          sender: reply.from ? this.getSenderName({ from: reply.from }) : "Unknown",
+          timestamp: reply.date * 1000,
+        };
+      }
 
       try {
         const file = await ctx.api.getFile(voice.file_id);
@@ -89,7 +115,9 @@ export class TelegramChannel implements Channel {
           sender: this.getSenderName(ctx),
           senderId: String(ctx.from!.id),
           audio: { base64: buffer.toString("base64"), filename: `voice_${Date.now()}.ogg` },
+          messageId: ctx.message.message_id,
           timestamp: Date.now(),
+          replyTo,
         });
       } catch (error) {
         log.error(`Voice download error: ${error}`);
@@ -108,6 +136,18 @@ export class TelegramChannel implements Channel {
       log.info(`Photo from ${ctx.from!.first_name} (${photo.width}x${photo.height})`);
       await ctx.api.sendChatAction(ctx.chat.id, "typing");
 
+      // Capture reply_to_message if present
+      let replyTo: IncomingMessage["replyTo"];
+      if (ctx.message.reply_to_message) {
+        const reply = ctx.message.reply_to_message;
+        replyTo = {
+          messageId: reply.message_id,
+          text: "text" in reply ? reply.text : undefined,
+          sender: reply.from ? this.getSenderName({ from: reply.from }) : "Unknown",
+          timestamp: reply.date * 1000,
+        };
+      }
+
       try {
         const file = await ctx.api.getFile(photo.file_id);
         if (!file.file_path) {
@@ -120,7 +160,9 @@ export class TelegramChannel implements Channel {
           sender: this.getSenderName(ctx),
           senderId: String(ctx.from!.id),
           image: { base64: buffer.toString("base64"), caption: caption || undefined },
+          messageId: ctx.message.message_id,
           timestamp: Date.now(),
+          replyTo,
         });
       } catch (error) {
         log.error(`Photo download error: ${error}`);
@@ -137,6 +179,18 @@ export class TelegramChannel implements Channel {
 
       log.info(`Document from ${ctx.from!.first_name}: ${doc.file_name} (${doc.mime_type})`);
       await ctx.api.sendChatAction(ctx.chat.id, "typing");
+
+      // Capture reply_to_message if present
+      let replyTo: IncomingMessage["replyTo"];
+      if (ctx.message.reply_to_message) {
+        const reply = ctx.message.reply_to_message;
+        replyTo = {
+          messageId: reply.message_id,
+          text: "text" in reply ? reply.text : undefined,
+          sender: reply.from ? this.getSenderName({ from: reply.from }) : "Unknown",
+          timestamp: reply.date * 1000,
+        };
+      }
 
       try {
         const file = await ctx.api.getFile(doc.file_id);
@@ -155,7 +209,9 @@ export class TelegramChannel implements Channel {
             mimeType: doc.mime_type || "application/octet-stream",
             caption: caption || undefined,
           },
+          messageId: ctx.message.message_id,
           timestamp: Date.now(),
+          replyTo,
         });
       } catch (error) {
         log.error(`Document download error: ${error}`);
@@ -174,12 +230,12 @@ export class TelegramChannel implements Channel {
     this.handler = handler;
   }
 
-  async send(chatId: string, text: string, parseMode: "HTML" | "plain" = "HTML"): Promise<void> {
+  async send(chatId: string, text: string, parseMode: "HTML" | "plain" = "HTML"): Promise<number | undefined> {
     try {
       if (parseMode === "HTML") {
         try {
-          await this.bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
-          return;
+          const sent = await this.bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
+          return sent.message_id;
         } catch (error) {
           if (error instanceof GrammyError && error.description?.includes("can't parse entities")) {
             log.warn("HTML parse failed, falling back to plain text");
@@ -195,7 +251,8 @@ export class TelegramChannel implements Channel {
         .replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">")
         .replace(/&quot;/g, '"');
-      await this.bot.api.sendMessage(chatId, plain);
+      const sent = await this.bot.api.sendMessage(chatId, plain);
+      return sent.message_id;
     } catch (error) {
       log.error(`Send error to ${chatId}: ${error}`);
       throw error;

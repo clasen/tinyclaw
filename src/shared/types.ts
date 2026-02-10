@@ -20,7 +20,14 @@ export interface IncomingMessage {
   image?: { base64: string; caption?: string };
   document?: { base64: string; filename: string; mimeType: string; caption?: string };
   command?: string;
+  messageId?: number;
   timestamp: number;
+  replyTo?: {
+    messageId?: number;
+    text?: string;
+    sender: string;
+    timestamp: number;
+  };
 }
 
 export interface CoreRequest {
@@ -54,17 +61,41 @@ export interface ScheduledTask {
   status?: "pending" | "done";
 }
 
+export interface AttachmentRecord {
+  id: string;
+  chatId: string;
+  type: "image" | "audio" | "document";
+  filename: string;
+  relPath: string;
+  mimeType?: string;
+  sizeBytes: number;
+  createdAt: number;
+}
+
 export interface ModelConfig {
   model: string;
   timeout: number;
   reason: string;
 }
 
+export interface MessageRecord {
+  id: string;                 // "{chatId}_{messageId}"
+  chatId: string;
+  messageId: number;          // Telegram message_id
+  direction: "in" | "out";
+  sender: string;
+  timestamp: number;
+  text?: string;
+  mediaType?: "image" | "audio" | "document";
+  attachmentPath?: string;
+  mediaDescription?: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
   onMessage(handler: (msg: IncomingMessage) => void): void;
-  send(chatId: string, text: string, parseMode?: "HTML" | "plain"): Promise<void>;
+  send(chatId: string, text: string, parseMode?: "HTML" | "plain"): Promise<number | undefined>;
   sendFile(chatId: string, filePath: string): Promise<void>;
   sendTyping(chatId: string): Promise<void>;
 }

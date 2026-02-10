@@ -3,16 +3,18 @@
  * @role Persist media attachments so the model can access them later.
  * @responsibilities
  *   - Save base64 attachments to .tinyclaw/attachments/{chatId}/
+ *   - Track metadata in deepbase (collection: "attachments")
  *   - Clean up files older than configured max age
- *   - Generate unique filenames with type prefix
- * @dependencies shared/config
- * @effects Disk I/O in .tinyclaw/attachments/
+ * @dependencies shared/config, shared/db
+ * @effects Disk I/O in .tinyclaw/attachments/, deepbase writes
  */
 
-import { mkdirSync, existsSync, readdirSync, statSync, unlinkSync, rmdirSync } from "fs";
-import { join } from "path";
+import { mkdirSync, existsSync, unlinkSync, rmdirSync, readdirSync } from "fs";
+import { join, dirname } from "path";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { addAttachment, getExpiredAttachments, deleteAttachment, cleanupOldMessages } from "../shared/db";
+import type { AttachmentRecord } from "../shared/types";
 
 const log = createLogger("core");
 
@@ -22,19 +24,24 @@ const EXT_MAP: Record<string, string> = {
   document: "bin",
 };
 
-export function initAttachments(): void {
+export async function initAttachments(): Promise<void> {
   if (!existsSync(config.attachmentsDir)) {
     mkdirSync(config.attachmentsDir, { recursive: true });
   }
-  cleanupOldAttachments();
+  await cleanupOldAttachments();
+  const msgsCleaned = await cleanupOldMessages(config.attachmentMaxAgeDays);
+  if (msgsCleaned > 0) {
+    log.info(`Cleaned up ${msgsCleaned} expired message record(s)`);
+  }
 }
 
-export function saveAttachment(
+export async function saveAttachment(
   chatId: string,
   type: "image" | "audio" | "document",
   base64: string,
   filename?: string,
-): string {
+  mimeType?: string,
+): Promise<string> {
   const chatDir = join(config.attachmentsDir, chatId);
   if (!existsSync(chatDir)) {
     mkdirSync(chatDir, { recursive: true });
@@ -47,41 +54,48 @@ export function saveAttachment(
   const outPath = join(chatDir, outName);
 
   const buffer = Buffer.from(base64, "base64");
-  Bun.write(outPath, buffer);
+  await Bun.write(outPath, buffer);
 
-  // Return path relative to project dir for model context
   const relPath = `.tinyclaw/attachments/${chatId}/${outName}`;
+
+  const record: AttachmentRecord = {
+    id: `${chatId}_${outName}`,
+    chatId,
+    type,
+    filename: filename || outName,
+    relPath,
+    mimeType,
+    sizeBytes: buffer.length,
+    createdAt: Date.now(),
+  };
+  await addAttachment(record);
+
   log.info(`Saved ${type} attachment: ${relPath} (${buffer.length} bytes)`);
   return relPath;
 }
 
-function cleanupOldAttachments(): void {
-  if (!existsSync(config.attachmentsDir)) return;
+async function cleanupOldAttachments(): Promise<void> {
+  const expired = await getExpiredAttachments(config.attachmentMaxAgeDays);
+  if (expired.length === 0) return;
 
-  const maxAge = config.attachmentMaxAgeDays * 24 * 60 * 60 * 1000;
-  const now = Date.now();
   let cleaned = 0;
-
-  for (const chatId of readdirSync(config.attachmentsDir)) {
-    const chatDir = join(config.attachmentsDir, chatId);
-    if (!statSync(chatDir).isDirectory()) continue;
-
-    for (const file of readdirSync(chatDir)) {
-      const filePath = join(chatDir, file);
-      const stat = statSync(filePath);
-      if (now - stat.mtimeMs > maxAge) {
-        unlinkSync(filePath);
-        cleaned++;
+  for (const record of expired) {
+    const absPath = join(config.projectDir, record.relPath);
+    try {
+      if (existsSync(absPath)) {
+        unlinkSync(absPath);
       }
+      // Remove empty chat dir
+      const dir = dirname(absPath);
+      if (existsSync(dir) && readdirSync(dir).length === 0) {
+        rmdirSync(dir);
+      }
+    } catch {
+      // File already gone — just clean the record
     }
-
-    // Remove empty chat dirs
-    if (readdirSync(chatDir).length === 0) {
-      rmdirSync(chatDir);
-    }
+    await deleteAttachment(record.id);
+    cleaned++;
   }
 
-  if (cleaned > 0) {
-    log.info(`Cleaned up ${cleaned} old attachment(s)`);
-  }
+  log.info(`Cleaned up ${cleaned} expired attachment(s)`);
 }

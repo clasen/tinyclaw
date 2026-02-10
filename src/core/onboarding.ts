@@ -10,33 +10,25 @@
  * @effects Reads/writes .tinyclaw/onboarded.json
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { getOnboardedUsers, addOnboarded as dbAddOnboarded, isOnboarded as dbIsOnboarded } from "../shared/db";
 
 const log = createLogger("core");
-const ONBOARDED_PATH = join(config.tinyclawDir, "onboarded.json");
 
 let onboardedChats: Set<string> = new Set();
 
-try {
-  if (existsSync(ONBOARDED_PATH)) {
-    onboardedChats = new Set(JSON.parse(readFileSync(ONBOARDED_PATH, "utf8")));
+async function loadOnboarded() {
+  try {
+    const users = await getOnboardedUsers();
+    onboardedChats = new Set(users);
+  } catch (error) {
+    log.warn(`Failed to load onboarded state: ${error}`);
   }
-} catch {
-  // Fresh start
 }
 
-function save() {
-  try {
-    const dir = dirname(ONBOARDED_PATH);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(ONBOARDED_PATH, JSON.stringify([...onboardedChats]));
-  } catch (e) {
-    log.warn(`Failed to save onboarded state: ${e}`);
-  }
-}
+// Load immediately
+loadOnboarded();
 
 export interface DepsStatus {
   claude: boolean;
@@ -65,23 +57,23 @@ export function isOnboarded(chatId: string): boolean {
   return onboardedChats.has(chatId);
 }
 
-export function markOnboarded(chatId: string) {
+export async function markOnboarded(chatId: string) {
   onboardedChats.add(chatId);
-  save();
+  await dbAddOnboarded(chatId);
 }
 
 /**
  * Returns onboarding message for first-time users, or null if everything is set up.
  * Only blocks if NO CLI is available at all.
  */
-export function getOnboarding(chatId: string): { message: string; blocking: boolean } | null {
+export async function getOnboarding(chatId: string): Promise<{ message: string; blocking: boolean } | null> {
   if (isOnboarded(chatId)) return null;
 
   const deps = checkDeps();
 
   // Everything set up — skip onboarding
   if (deps.claude && deps.codex && deps.openaiKey) {
-    markOnboarded(chatId);
+    await markOnboarded(chatId);
     return null;
   }
 
@@ -102,7 +94,7 @@ export function getOnboarding(chatId: string): { message: string; blocking: bool
   }
 
   // At least one CLI — inform and continue
-  markOnboarded(chatId);
+  await markOnboarded(chatId);
 
   const using = deps.claude ? "Claude" : "Codex";
   const lines = [`<b>TinyClaw</b> — using <b>${using}</b>`];

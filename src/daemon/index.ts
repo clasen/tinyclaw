@@ -25,6 +25,7 @@ const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
 const { startCore, stopCore } = await import("./lifecycle");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
+const { saveMessageRecord } = await import("../shared/db");
 
 const log = createLogger("daemon");
 
@@ -49,7 +50,18 @@ telegram.onMessage(async (msg) => {
     const chunks = chunkMessage(html);
 
     for (const chunk of chunks) {
-      await telegram.send(msg.chatId, chunk);
+      const sentId = await telegram.send(msg.chatId, chunk);
+      if (sentId) {
+        saveMessageRecord({
+          id: `${msg.chatId}_${sentId}`,
+          chatId: msg.chatId,
+          messageId: sentId,
+          direction: "out",
+          sender: "TinyClaw",
+          timestamp: Date.now(),
+          text: chunk,
+        }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
+      }
     }
 
     if (response.files) {
@@ -84,7 +96,18 @@ const pushServer = await serveWithRetry({
         const html = markdownToTelegramHtml(body.text);
         const chunks = chunkMessage(html);
         for (const chunk of chunks) {
-          await telegram.send(body.chatId, chunk);
+          const sentId = await telegram.send(body.chatId, chunk);
+          if (sentId) {
+            saveMessageRecord({
+              id: `${body.chatId}_${sentId}`,
+              chatId: body.chatId,
+              messageId: sentId,
+              direction: "out",
+              sender: "TinyClaw",
+              timestamp: Date.now(),
+              text: chunk,
+            }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
+          }
         }
 
         if (body.files) {

@@ -10,10 +10,9 @@
  */
 
 import { Cron } from "croner";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { getTasks, updateTask, deleteTask, addTask as dbAddTask } from "../shared/db";
 import type { ScheduledTask } from "../shared/types";
 
 const log = createLogger("scheduler");
@@ -21,27 +20,21 @@ const log = createLogger("scheduler");
 let tasks: ScheduledTask[] = [];
 const activeJobs = new Map<string, Cron | ReturnType<typeof setTimeout>>();
 
-function loadTasks(): ScheduledTask[] {
-  if (!existsSync(config.tasksFile)) return [];
+async function loadTasks(): Promise<ScheduledTask[]> {
   try {
-    const raw = readFileSync(config.tasksFile, "utf8");
-    const data = JSON.parse(raw);
-    return Array.isArray(data) ? data : [];
+    return await getTasks();
   } catch (error) {
-    log.error(`Failed to read tasks.json: ${error}`);
+    log.error(`Failed to load tasks from db: ${error}`);
     return [];
   }
 }
 
-function saveTasks() {
-  const dir = dirname(config.tasksFile);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+async function saveTask(task: ScheduledTask) {
+  try {
+    await updateTask(task.id, task);
+  } catch (error) {
+    log.error(`Failed to save task ${task.id}: ${error}`);
   }
-  const tmp = `${config.tasksFile}.tmp`;
-  writeFileSync(tmp, JSON.stringify(tasks, null, 2));
-  const { renameSync } = require("fs");
-  renameSync(tmp, config.tasksFile);
 }
 
 async function executeTask(task: ScheduledTask) {
@@ -68,27 +61,27 @@ function scheduleTask(task: ScheduledTask) {
     if (task.status === "done") return;
     const delay = (task.runAt || 0) - Date.now();
     if (delay <= 0) {
-      executeTask(task).then(() => {
+      executeTask(task).then(async () => {
         task.status = "done";
         task.lastRunAt = Date.now();
-        saveTasks();
+        await saveTask(task);
       });
       return;
     }
     const timer = setTimeout(() => {
-      executeTask(task).then(() => {
+      executeTask(task).then(async () => {
         task.status = "done";
         task.lastRunAt = Date.now();
         activeJobs.delete(task.id);
-        saveTasks();
+        await saveTask(task);
       });
     }, delay);
     activeJobs.set(task.id, timer);
     log.info(`Scheduled one-time task ${task.id} in ${Math.round(delay / 1000)}s`);
   } else if (task.type === "cron" && task.cron) {
-    const job = new Cron(task.cron, () => {
+    const job = new Cron(task.cron, async () => {
       task.lastRunAt = Date.now();
-      saveTasks();
+      await saveTask(task);
       executeTask(task);
     });
     activeJobs.set(task.id, job);
@@ -96,35 +89,44 @@ function scheduleTask(task: ScheduledTask) {
   }
 }
 
-export function initScheduler() {
-  tasks = loadTasks();
+export async function initScheduler() {
+  tasks = await loadTasks();
   log.info(`Loaded ${tasks.length} tasks`);
 
   // Clean old completed one-time tasks (> 7 days)
   const retentionMs = 7 * 24 * 60 * 60 * 1000;
   const now = Date.now();
+
+  const tasksToDelete: string[] = [];
   tasks = tasks.filter((t) => {
     if (t.type === "once" && t.status === "done") {
-      return now - (t.lastRunAt || t.runAt || now) < retentionMs;
+      const shouldKeep = now - (t.lastRunAt || t.runAt || now) < retentionMs;
+      if (!shouldKeep) {
+        tasksToDelete.push(t.id);
+      }
+      return shouldKeep;
     }
     return true;
   });
 
+  // Delete old tasks from db
+  for (const id of tasksToDelete) {
+    await deleteTask(id);
+  }
+
   for (const task of tasks) {
     scheduleTask(task);
   }
-
-  saveTasks();
 }
 
-export function addTask(task: ScheduledTask) {
+export async function addTask(task: ScheduledTask) {
   tasks.push(task);
   scheduleTask(task);
-  saveTasks();
+  await dbAddTask(task);
   log.info(`Added task ${task.id} (${task.type})`);
 }
 
-export function cancelRecurringTasks(chatId: string): number {
+export async function cancelRecurringTasks(chatId: string): Promise<number> {
   let removed = 0;
   for (let i = tasks.length - 1; i >= 0; i -= 1) {
     const task = tasks[i];
@@ -136,12 +138,10 @@ export function cancelRecurringTasks(chatId: string): number {
         clearTimeout(job as ReturnType<typeof setTimeout>);
       }
       activeJobs.delete(task.id);
+      await deleteTask(task.id);
       tasks.splice(i, 1);
       removed += 1;
     }
-  }
-  if (removed > 0) {
-    saveTasks();
   }
   return removed;
 }

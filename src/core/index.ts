@@ -25,6 +25,7 @@ import { initScheduler, addTask } from "./scheduler";
 import { detectScheduleIntent } from "./intent";
 import { initAuth, isAuthorized, tryAuthorize } from "./auth";
 import { initAttachments, saveAttachment } from "./attachments";
+import { saveMessageRecord, getMessageRecord } from "../shared/db";
 
 const log = createLogger("core");
 
@@ -44,9 +45,9 @@ function getBackend(chatId: string): "claude" | "codex" {
 }
 
 // Initialize auth + scheduler + attachments
-initAuth();
-initScheduler();
-initAttachments();
+await initAuth();
+await initScheduler();
+await initAttachments();
 
 const server = await serveWithRetry({
   port: config.corePort,
@@ -70,14 +71,14 @@ const server = await serveWithRetry({
 
         // Auth gate: require token before anything else
         if (!isAuthorized(msg.chatId)) {
-          if (msg.text && tryAuthorize(msg.chatId, msg.text)) {
+          if (msg.text && await tryAuthorize(msg.chatId, msg.text)) {
             return Response.json({ text: "Authorized. Welcome to TinyClaw!" } as CoreResponse);
           }
           return Response.json({ text: "Send the auth token to start. Check the server console." } as CoreResponse);
         }
 
         // Onboarding: first message from this chat
-        const onboarding = getOnboarding(msg.chatId);
+        const onboarding = await getOnboarding(msg.chatId);
         if (onboarding?.blocking) {
           return Response.json({ text: onboarding.message } as CoreResponse);
         }
@@ -85,10 +86,48 @@ const server = await serveWithRetry({
         // Initialize message text
         let messageText = msg.text || "";
 
+        // Prepend reply context if message quotes another message
+        if (msg.replyTo) {
+          let quotedText = msg.replyTo.text || "";
+          let quotedSender = msg.replyTo.sender;
+          let quotedDate = new Date(msg.replyTo.timestamp).toLocaleString("es-AR");
+          let attachmentInfo = "";
+
+          // Try ledger lookup for richer context
+          if (msg.replyTo.messageId) {
+            const ledger = await getMessageRecord(msg.chatId, msg.replyTo.messageId);
+            if (ledger) {
+              quotedText = ledger.text || quotedText;
+              quotedSender = ledger.sender;
+              quotedDate = new Date(ledger.timestamp).toLocaleString("es-AR");
+              if (ledger.mediaDescription) {
+                attachmentInfo += `\nMedia description: ${ledger.mediaDescription}`;
+              }
+              if (ledger.attachmentPath) {
+                attachmentInfo += `\nAttachment: ${ledger.attachmentPath}`;
+              }
+            }
+          }
+
+          if (!quotedText && !attachmentInfo) {
+            quotedText = "[media or unknown content]";
+          }
+
+          messageText = `━━━ QUOTED MESSAGE ━━━
+From: ${quotedSender}
+Date: ${quotedDate}
+Content: "${quotedText}"${attachmentInfo}
+━━━━━━━━━━━━━━━━━━━━
+
+${messageText}`;
+        }
+
         // Handle /reset command
         if (msg.command === "/reset") {
           const { writeFileSync } = await import("fs");
           writeFileSync(config.resetFlagPath, "reset");
+          const { resetRouterState } = await import("./router");
+          resetRouterState();
           const response: CoreResponse = { text: "Conversation reset! Next message will start a fresh conversation." };
           return Response.json(response);
         }
@@ -123,14 +162,20 @@ const server = await serveWithRetry({
           return Response.json(response);
         }
 
-        // Process media first
+        // Process media first — track metadata for message ledger
+        let ledgerMediaType: "image" | "audio" | "document" | undefined;
+        let ledgerAttachmentPath: string | undefined;
+        let ledgerMediaDescription: string | undefined;
 
         if (msg.audio) {
-          const audioPath = saveAttachment(msg.chatId, "audio", msg.audio.base64, msg.audio.filename);
+          const audioPath = await saveAttachment(msg.chatId, "audio", msg.audio.base64, msg.audio.filename);
+          ledgerMediaType = "audio";
+          ledgerAttachmentPath = audioPath;
           if (isMediaConfigured()) {
             try {
               const transcription = await transcribeAudio(msg.audio.base64, msg.audio.filename);
               if (transcription.trim()) {
+                ledgerMediaDescription = transcription;
                 messageText = `[Audio saved to ${audioPath}]\n[Voice message transcription]: ${transcription}`;
               } else {
                 messageText = `[Audio saved to ${audioPath}]\n[Transcription returned empty. Ask the user to try again or send text.]`;
@@ -146,15 +191,20 @@ const server = await serveWithRetry({
 
         if (msg.image) {
           const caption = msg.image.caption || "";
-          const imgPath = saveAttachment(msg.chatId, "image", msg.image.base64);
+          const imgPath = await saveAttachment(msg.chatId, "image", msg.image.base64);
+          ledgerMediaType = "image";
+          ledgerAttachmentPath = imgPath;
 
           if (caption && isMediaConfigured()) {
             // User sent text with the image → describe it via Vision
             try {
               const description = await describeImage(msg.image.base64, caption);
-              messageText = description.trim()
-                ? `[Image saved to ${imgPath}]\n[Image description: ${description}]\n${caption}`
-                : `[Image saved to ${imgPath}]\n[Image content could not be interpreted]\n${caption}`;
+              if (description.trim()) {
+                ledgerMediaDescription = description;
+                messageText = `[Image saved to ${imgPath}]\n[Image description: ${description}]\n${caption}`;
+              } else {
+                messageText = `[Image saved to ${imgPath}]\n[Image content could not be interpreted]\n${caption}`;
+              }
             } catch (error) {
               log.error(`Image analysis failed: ${error}`);
               messageText = `[Image saved to ${imgPath}]\n[Error analyzing the image]\n${caption}`;
@@ -169,7 +219,9 @@ const server = await serveWithRetry({
         }
 
         if (msg.document) {
-          const docPath = saveAttachment(msg.chatId, "document", msg.document.base64, msg.document.filename);
+          const docPath = await saveAttachment(msg.chatId, "document", msg.document.base64, msg.document.filename, msg.document.mimeType);
+          ledgerMediaType = "document";
+          ledgerAttachmentPath = docPath;
           const caption = msg.document.caption || "";
           messageText = caption
             ? `[Document saved to ${docPath}] (${msg.document.mimeType})\n${caption}`
@@ -179,6 +231,22 @@ const server = await serveWithRetry({
         if (!messageText) {
           const response: CoreResponse = { text: "Empty message received." };
           return Response.json(response);
+        }
+
+        // Save incoming message to ledger (after media processing so we have descriptions)
+        if (msg.messageId) {
+          saveMessageRecord({
+            id: `${msg.chatId}_${msg.messageId}`,
+            chatId: msg.chatId,
+            messageId: msg.messageId,
+            direction: "in",
+            sender: msg.sender,
+            timestamp: msg.timestamp,
+            text: messageText,
+            mediaType: ledgerMediaType,
+            attachmentPath: ledgerAttachmentPath,
+            mediaDescription: ledgerMediaDescription,
+          }).catch((e) => log.error(`Failed to save incoming message record: ${e}`));
         }
 
         // Detect scheduling intent via haiku (language-agnostic)
@@ -201,7 +269,7 @@ const server = await serveWithRetry({
               ? { cron: scheduleIntent.cron }
               : {}),
           };
-          addTask(task);
+          await addTask(task);
           const response: CoreResponse = { text: scheduleIntent.confirmation };
           return Response.json(response);
         }

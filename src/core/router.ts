@@ -22,20 +22,43 @@ const OPUS_PATTERNS = [
   /```[\s\S]*```/,
 ];
 
+// Recency-aware state: prevent haiku downgrade during active conversations
+const RECENCY_WINDOW = 5 * 60 * 1000; // 5 minutes
+let lastModel: string | null = null;
+let lastCallAt = 0;
+
+export function resetRouterState(): void {
+  lastModel = null;
+  lastCallAt = 0;
+}
+
 export function selectModel(message: string): ModelConfig {
   const stripped = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-  for (const pattern of HAIKU_PATTERNS) {
-    if (pattern.test(stripped)) {
-      return { model: "haiku", timeout: 30_000, reason: "simple/acknowledgment" };
-    }
+  let candidate: ModelConfig;
+
+  const isHaiku = HAIKU_PATTERNS.some((p) => p.test(stripped));
+  const isOpus = OPUS_PATTERNS.some((p) => p.test(stripped) || p.test(message));
+
+  if (isHaiku) {
+    candidate = { model: "haiku", timeout: 30_000, reason: "simple/acknowledgment" };
+  } else if (isOpus) {
+    candidate = { model: "opus", timeout: 180_000, reason: "code/complex task" };
+  } else {
+    candidate = { model: "sonnet", timeout: 120_000, reason: "general conversation" };
   }
 
-  for (const pattern of OPUS_PATTERNS) {
-    if (pattern.test(stripped) || pattern.test(message)) {
-      return { model: "opus", timeout: 180_000, reason: "code/complex task" };
-    }
+  // Don't downgrade to haiku if there's a recent conversation on a higher model
+  if (
+    candidate.model === "haiku" &&
+    lastModel &&
+    lastModel !== "haiku" &&
+    Date.now() - lastCallAt < RECENCY_WINDOW
+  ) {
+    candidate = { model: lastModel, timeout: lastModel === "opus" ? 180_000 : 120_000, reason: "keeping context (was: simple/acknowledgment)" };
   }
 
-  return { model: "sonnet", timeout: 120_000, reason: "general conversation" };
+  lastModel = candidate.model;
+  lastCallAt = Date.now();
+  return candidate;
 }

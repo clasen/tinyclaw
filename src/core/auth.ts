@@ -2,57 +2,43 @@
  * @module core/auth
  * @role Gate access to the bot via a one-time token shown in the console.
  * @responsibilities
- *   - Generate and persist an auth token on first run
- *   - Track authorized chat IDs in .tinyclaw/authorized.json
+ *   - Generate and persist an auth token via deepbase (settings.auth_token)
+ *   - Track authorized chat IDs via deepbase (authorized collection)
  *   - Validate tokens from new chats
- * @dependencies shared/config
- * @effects Disk I/O (.tinyclaw/auth_token, .tinyclaw/authorized.json), console output
+ * @dependencies shared/db
+ * @effects deepbase writes, console output
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { getAuthorizedUsers, addAuthorized, getSetting, setSetting } from "../shared/db";
 
 const log = createLogger("auth");
-const TOKEN_PATH = join(config.tinyclawDir, "auth_token");
-const AUTHORIZED_PATH = join(config.tinyclawDir, "authorized.json");
 
 let authToken = "";
 let authorizedChats: Set<string> = new Set();
 
-function ensureDir(filePath: string) {
-  const dir = dirname(filePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-}
+async function loadToken(): Promise<string> {
+  const existing = await getSetting("auth_token");
+  if (existing) return existing;
 
-function loadToken(): string {
-  if (existsSync(TOKEN_PATH)) {
-    return readFileSync(TOKEN_PATH, "utf8").trim();
-  }
-  const token = crypto.randomUUID().split("-")[0]; // Short 8-char hex token
-  ensureDir(TOKEN_PATH);
-  writeFileSync(TOKEN_PATH, token);
+  const token = crypto.randomUUID().split("-")[0];
+  await setSetting("auth_token", token);
   return token;
 }
 
-function loadAuthorized(): Set<string> {
-  if (!existsSync(AUTHORIZED_PATH)) return new Set();
+async function loadAuthorized(): Promise<Set<string>> {
   try {
-    return new Set(JSON.parse(readFileSync(AUTHORIZED_PATH, "utf8")));
-  } catch {
+    const users = await getAuthorizedUsers();
+    return new Set(users);
+  } catch (error) {
+    log.error(`Failed to load authorized users: ${error}`);
     return new Set();
   }
 }
 
-function saveAuthorized() {
-  ensureDir(AUTHORIZED_PATH);
-  writeFileSync(AUTHORIZED_PATH, JSON.stringify([...authorizedChats]));
-}
-
-export function initAuth() {
-  authToken = loadToken();
-  authorizedChats = loadAuthorized();
+export async function initAuth() {
+  authToken = await loadToken();
+  authorizedChats = await loadAuthorized();
   log.info(`Auth token: ${authToken}`);
   console.log(`\n🔑 Auth token: ${authToken}\n   Send this token to the bot on Telegram to authorize a chat.\n`);
 }
@@ -61,10 +47,10 @@ export function isAuthorized(chatId: string): boolean {
   return authorizedChats.has(chatId);
 }
 
-export function tryAuthorize(chatId: string, message: string): boolean {
+export async function tryAuthorize(chatId: string, message: string): Promise<boolean> {
   if (message.trim() === authToken) {
     authorizedChats.add(chatId);
-    saveAuthorized();
+    await addAuthorized(chatId);
     log.info(`Chat ${chatId} authorized`);
     return true;
   }

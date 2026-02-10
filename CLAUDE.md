@@ -53,7 +53,7 @@ src/
 │   ├── processor.ts        # Executes claude CLI with model routing
 │   ├── router.ts           # Selects model (haiku/sonnet/opus) by message pattern
 │   ├── media.ts            # Voice transcription (Whisper) + image analysis (Vision)
-│   ├── scheduler.ts        # Cron + one-time tasks with croner, persists tasks.json
+│   ├── scheduler.ts        # Cron + one-time tasks with croner, persists via deepbase
 │   ├── format.ts           # Telegram chunking (4096 char limit)
 │   ├── file-detector.ts    # Detect file paths in responses for auto-sending
 │   └── context.ts          # Manage -c flag and reset_flag
@@ -61,7 +61,8 @@ src/
 └── shared/
     ├── types.ts            # All shared interfaces
     ├── config.ts           # Env vars, ports, paths
-    └── logger.ts           # Logger → .tinyclaw/logs/
+    ├── logger.ts           # Logger → .tinyclaw/logs/
+    └── db.ts               # Unified persistence layer (deepbase)
 ```
 
 ## Model Routing
@@ -85,10 +86,29 @@ Configured in `.claude/settings.json`:
 
 All runtime data lives under `.tinyclaw/` (gitignored):
 - `logs/` — per-component log files (core, daemon, telegram, scheduler)
-- `scheduler/tasks.json` — persisted scheduled tasks
+- `db/tinyclaw.json` — unified persistence with deepbase
+- `attachments/` — saved media files organized by `{chatId}/`
 - `.env` — TELEGRAM_BOT_TOKEN, OPENAI_API_KEY
 - `voice_temp/` — temporary directory for voice transcription
 - `reset_flag` — conversation reset marker
+
+### Persistence with DeepBase
+
+All persistent data is managed by **deepbase** (`src/shared/db.ts`). Location: `.tinyclaw/db/tinyclaw.json`.
+
+| Collection      | Key           | Value type         | Description                              |
+|-----------------|---------------|--------------------|------------------------------------------|
+| `tasks`         | `task.id`     | `ScheduledTask`    | Cron and one-time scheduled tasks        |
+| `authorized`    | `chatId`      | `{ userId }`       | Authorized Telegram chats                |
+| `onboarded`     | `chatId`      | `{ userId }`       | Chats that completed onboarding          |
+| `queue`         | `message.id`  | queue message      | In-memory queue overflow (Daemon→Core)   |
+| `attachments`   | `chatId_file` | `AttachmentRecord` | Metadata for saved media (files on disk) |
+| `messages`      | `chatId_msgId`| `MessageRecord`    | Message ledger for reply context         |
+| `settings`      | key name      | `{ value }`        | App settings (auth_token, etc.)          |
+
+- **API**: `db.get(collection, key)`, `db.set(collection, key, data)`, `db.del(collection, key)`
+- **Helper functions**: `src/shared/db.ts` provides type-safe wrappers per collection
+- **Migration**: Run `bun run scripts/migrate-to-deepbase.ts` to migrate from old JSON files
 
 ## Response Formatting
 
