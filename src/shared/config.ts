@@ -37,8 +37,8 @@ export const config = {
   projectDir: PROJECT_DIR,
   tinyclawDir: join(PROJECT_DIR, ".tinyclaw"),
 
-  corePort: 7777,
-  daemonPort: 7778,
+  corePort: 51777,
+  daemonPort: 51778,
 
   telegramBotToken: env("TELEGRAM_BOT_TOKEN") || "",
   openaiApiKey: env("OPENAI_API_KEY") || "",
