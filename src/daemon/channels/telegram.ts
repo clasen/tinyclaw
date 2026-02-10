@@ -188,7 +188,14 @@ export class TelegramChannel implements Channel {
           }
         }
       }
-      await this.bot.api.sendMessage(chatId, text);
+      // Strip HTML tags and unescape entities for plain text
+      const plain = text
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"');
+      await this.bot.api.sendMessage(chatId, plain);
     } catch (error) {
       log.error(`Send error to ${chatId}: ${error}`);
       throw error;

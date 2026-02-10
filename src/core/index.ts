@@ -18,7 +18,7 @@ import type { IncomingMessage, CoreResponse, ScheduledTask } from "../shared/typ
 import { processWithClaude, processWithCodex } from "./processor";
 import { transcribeAudio, describeImage, isMediaConfigured } from "./media";
 import { detectFiles } from "./file-detector";
-import { chunkMessage } from "./format";
+
 import { addExchange, getForeignContext } from "./history";
 import { getOnboarding, checkDeps } from "./onboarding";
 import { initScheduler, addTask } from "./scheduler";
@@ -253,14 +253,13 @@ const server = await serveWithRetry({
 
         // Prepend onboarding info if first message (non-blocking)
         const fullResponse = onboarding
-          ? onboarding.message + "\n\n---CHUNK---\n" + agentResponse
+          ? onboarding.message + "\n\n" + agentResponse
           : agentResponse;
 
         const files = detectFiles(agentResponse);
-        const chunks = chunkMessage(fullResponse);
 
         const response: CoreResponse = {
-          text: chunks.join("\n---CHUNK---\n"),
+          text: fullResponse,
           files: files.length > 0 ? files : undefined,
         };
 

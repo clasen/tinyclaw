@@ -24,7 +24,7 @@ const { serveWithRetry, claimProcess, releaseProcess } = await import("../shared
 const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
 const { startCore, stopCore } = await import("./lifecycle");
-const { chunkMessage } = await import("../core/format");
+const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
 
 const log = createLogger("daemon");
 
@@ -42,9 +42,11 @@ telegram.onMessage(async (msg) => {
     const response = await sendToCore(msg);
     clearInterval(typingInterval);
 
-    const chunks = response.text.includes("---CHUNK---")
-      ? response.text.split("\n---CHUNK---\n")
-      : chunkMessage(response.text);
+    // Convert markdown to HTML first, then chunk the HTML
+    // (chunking must happen after HTML conversion so tag-aware splitting works)
+    const raw = response.text.replace(/\n---CHUNK---\n/g, "\n");
+    const html = markdownToTelegramHtml(raw);
+    const chunks = chunkMessage(html);
 
     for (const chunk of chunks) {
       await telegram.send(msg.chatId, chunk);
@@ -79,7 +81,8 @@ const pushServer = await serveWithRetry({
           return Response.json({ error: "Missing chatId or text" }, { status: 400 });
         }
 
-        const chunks = chunkMessage(body.text);
+        const html = markdownToTelegramHtml(body.text);
+        const chunks = chunkMessage(html);
         for (const chunk of chunks) {
           await telegram.send(body.chatId, chunk);
         }
