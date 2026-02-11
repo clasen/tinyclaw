@@ -20,6 +20,7 @@ const log = createLogger("core");
 const HISTORY_PATH = join(config.arisaDir, "history.jsonl");
 const MAX_ENTRIES_PER_CHAT = 50;
 const FOREIGN_CONTEXT_MAX_AGE_MS = 30 * 60 * 1000;
+const CODEX_SWITCH_NOTICE = "Claude is out of credits right now, so I switched this reply to Codex.";
 
 interface Exchange {
   ts: number;
@@ -35,7 +36,10 @@ let history: Exchange[] = [];
 try {
   if (existsSync(HISTORY_PATH)) {
     const lines = readFileSync(HISTORY_PATH, "utf8").split("\n").filter(Boolean);
-    history = lines.map((l) => JSON.parse(l));
+    history = lines.map((l) => {
+      const entry = JSON.parse(l) as Exchange;
+      return { ...entry, response: normalizeResponse(entry.response) };
+    });
     log.info(`Loaded ${history.length} history entries`);
   }
 } catch (e) {
@@ -111,7 +115,7 @@ export function getForeignContext(
   const otherName = currentBackend === "claude" ? "Codex" : "Claude";
   const lines = foreign
     .slice(-limit)
-    .map((e) => `User: ${e.user}\n${otherName}: ${e.response}`)
+    .map((e) => `User: ${e.user}\n${otherName}: ${normalizeResponse(e.response)}`)
     .join("\n\n");
 
   return `[Contexto previo con ${otherName}]\n${lines}\n[Fin del contexto previo]\n\n`;
@@ -134,7 +138,7 @@ export function getRecentHistory(
 
   // Format exchanges
   const formatted = recent.map(
-    (e) => `User: ${e.user}\nAssistant: ${e.response}`,
+    (e) => `User: ${e.user}\nAssistant: ${normalizeResponse(e.response)}`,
   );
 
   // Trim oldest entries if total exceeds maxChars
@@ -167,6 +171,23 @@ export function clearHistory(chatId: string): void {
   }
 }
 
+export function getLastBackend(chatId: string): "claude" | "codex" | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].chatId === chatId) {
+      return history[i].backend;
+    }
+  }
+  return null;
+}
+
 function normalizeResponse(response: string): string {
-  return response.replace(/\n---CHUNK---\n/g, "\n").trim();
+  const cleaned = response
+    .replace(/\n---CHUNK---\n/g, "\n")
+    .replace(new RegExp(`^${escapeRegExp(CODEX_SWITCH_NOTICE)}\\s*`, "m"), "")
+    .trim();
+  return cleaned;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

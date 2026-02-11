@@ -32,10 +32,9 @@ let autofixInProgress = false;
 const BUF_MAX = 2000;
 const HEALTH_CHECK_INTERVAL = 1000;
 
-// Patterns that indicate real errors in Core output
+// Patterns that indicate real errors in Core STDERR output
 const ERROR_PATTERNS = [
-  /\[WARN\].*(?:Error|Failed|error|failed)/i,
-  /\[ERROR\]/i,
+  /error:/i,
   /SyntaxError/,
   /TypeError/,
   /ReferenceError/,
@@ -188,11 +187,11 @@ export function startCore() {
   });
 
   // Capture streams: print to console + accumulate + detect errors
-  if (coreProcess.stdout) {
-    pipeAndWatch(coreProcess.stdout, process.stdout, stdoutBuf, onErrorDetected);
+  if (coreProcess.stdout && typeof coreProcess.stdout !== "number") {
+    pipeAndWatch(coreProcess.stdout, process.stdout, stdoutBuf, onErrorDetected, false);
   }
-  if (coreProcess.stderr) {
-    pipeAndWatch(coreProcess.stderr, process.stderr, stderrBuf, onErrorDetected);
+  if (coreProcess.stderr && typeof coreProcess.stderr !== "number") {
+    pipeAndWatch(coreProcess.stderr, process.stderr, stderrBuf, onErrorDetected, true);
   }
 
   if (coreState === "starting") {
@@ -210,6 +209,7 @@ function pipeAndWatch(
   target: NodeJS.WriteStream,
   buf: { data: string },
   onError: () => void,
+  watchErrors: boolean,
 ) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -226,8 +226,8 @@ function pipeAndWatch(
           buf.data = buf.data.slice(-BUF_MAX);
         }
 
-        // Check for error patterns in this chunk
-        if (ERROR_PATTERNS.some((p) => p.test(chunk))) {
+        // Check for fatal/runtime-like patterns only when explicitly watching this stream.
+        if (watchErrors && ERROR_PATTERNS.some((p) => p.test(chunk))) {
           onError();
         }
       }

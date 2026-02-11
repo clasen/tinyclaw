@@ -22,7 +22,7 @@ import { processWithClaude, processWithCodex, isClaudeRateLimitResponse } from "
 import { transcribeAudio, describeImage, generateSpeech, isMediaConfigured, isSpeechConfigured } from "./media";
 import { detectFiles } from "./file-detector";
 
-import { addExchange, getForeignContext, clearHistory } from "./history";
+import { addExchange, getForeignContext, clearHistory, getLastBackend } from "./history";
 import { getOnboarding, checkDeps } from "./onboarding";
 import { initScheduler, addTask, cancelAllChatTasks } from "./scheduler";
 import { detectScheduleIntent } from "./intent";
@@ -44,7 +44,16 @@ function defaultBackend(): "claude" | "codex" {
 }
 
 function getBackend(chatId: string): "claude" | "codex" {
-  return backendState.get(chatId) || defaultBackend();
+  const current = backendState.get(chatId);
+  if (current) return current;
+
+  const fromHistory = getLastBackend(chatId);
+  if (fromHistory) {
+    backendState.set(chatId, fromHistory);
+    return fromHistory;
+  }
+
+  return defaultBackend();
 }
 
 // Initialize auth + scheduler + attachments
