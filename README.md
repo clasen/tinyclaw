@@ -23,10 +23,10 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 ```bash
 bun install -g arisa     # Global install from package registry (recommended)
-npm install -g arisa     # Alternative global install via npm (may require sudo)
 ```
 
 ```bash
+arisa                    # Foreground daemon mode (Ctrl+C to stop)
 arisa start              # Start as service (enables autostart with systemd --user)
 arisa stop               # Stop service
 arisa status             # Service status
@@ -36,13 +36,6 @@ arisa core               # Foreground core-only mode
 arisa dev                # Foreground core watch mode
 ```
 
-```bash
-bun install              # Install dependencies
-bun run daemon           # Start everything (Daemon spawns Core with --watch)
-bun run dev              # Start Core only with hot-reload (for development)
-npm install -g .         # Global install via Node/npm
-bun add -g .             # Global install via Bun
-```
 
 On Linux with `systemd --user`, `arisa start` enables auto-start on reboot. To keep it running even without an active login session:
 
@@ -95,12 +88,12 @@ src/
 │   ├── media.ts            # Voice transcription (Whisper), image analysis (Vision), speech synthesis (ElevenLabs)
 │   ├── scheduler.ts        # Cron + one-time tasks with croner, persists via deepbase
 │   ├── format.ts           # Telegram chunking (4096 char limit)
-│   ├── file-detector.ts    # Detect file paths in responses for auto-sending
+│   ├── file-detector.ts     # Detect file paths in responses for auto-sending
 │   └── context.ts          # Manage -c flag and reset_flag
 │
 └── shared/
     ├── types.ts            # All shared interfaces
-    ├── config.ts           # Env vars, ports, paths
+    ├── config.ts            # Env vars, ports, paths
     ├── logger.ts           # Logger → .arisa/logs/
     └── db.ts               # Unified persistence layer (deepbase)
 ```

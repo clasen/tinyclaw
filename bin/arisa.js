@@ -27,15 +27,17 @@ const systemdUserDir = join(homeDir, ".config", "systemd", "user");
 const systemdUserUnitPath = join(systemdUserDir, systemdServiceName);
 
 const args = process.argv.slice(2);
-const command = (args[0] || "start").toLowerCase();
-const rest = args.slice(1);
+const inputCommand = (args[0] || "").toLowerCase();
+const command = inputCommand || "daemon";
+const rest = inputCommand ? args.slice(1) : args;
+const isDefaultInvocation = inputCommand === "";
 
 function printHelp() {
   process.stdout.write(
     `Arisa CLI
 
 Usage:
-  arisa                 Start service (default)
+  arisa                 Start daemon in foreground (default)
   arisa start           Start service and enable restart-on-boot
   arisa stop            Stop service
   arisa status          Show service status
@@ -396,6 +398,11 @@ function restartService() {
   return restartDetachedFallback();
 }
 
+function printForegroundNotice() {
+  process.stdout.write("Starting Arisa in foreground. Press Ctrl+C to stop.\n");
+  process.stdout.write("Use `arisa start` to run it as a background service.\n");
+}
+
 if (command === "help" || command === "--help" || command === "-h") {
   printHelp();
   process.exit(0);
@@ -421,6 +428,9 @@ switch (command) {
     break;
   case "daemon":
   case "run": {
+    if (isDefaultInvocation) {
+      printForegroundNotice();
+    }
     const child = runWithBun([daemonEntry, ...rest]);
     process.exit(child.status === null ? 1 : child.status);
   }

@@ -24,10 +24,11 @@ const ACTIVITY_LOG = join(config.logsDir, "activity.log");
 const PROMPT_PREVIEW_MAX = 220;
 export const CLAUDE_RATE_LIMIT_MESSAGE = "Claude is out of credits right now. Please try again in a few minutes.";
 export const CODEX_AUTH_REQUIRED_MESSAGE = [
-  "Codex is not authenticated on this server.",
-  "Check the server terminal and run:",
+  "Codex login is required.",
+  "Check the Arisa daemon logs now and complete the device-auth steps shown there.",
+  "If the login flow is not running, execute:",
   "<code>codex login --device-auth</code>",
-  "Then try again.",
+  "Then send your message again.",
 ].join("\n");
 
 function logActivity(backend: string, model: string | null, durationMs: number, status: string) {

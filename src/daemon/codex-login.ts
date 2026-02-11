@@ -23,13 +23,22 @@ const RETRY_COOLDOWN_MS = 30_000;
 
 let loginInProgress = false;
 let lastLoginAttemptAt = 0;
+const pendingChatIds = new Set<string>();
+
+type NotifyFn = (chatId: string, text: string) => Promise<void>;
+let notifyFn: NotifyFn | null = null;
+
+export function setCodexLoginNotify(fn: NotifyFn) {
+  notifyFn = fn;
+}
 
 function needsCodexLogin(text: string): boolean {
   return AUTH_HINT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-export function maybeStartCodexDeviceAuth(rawCoreText: string): void {
+export function maybeStartCodexDeviceAuth(rawCoreText: string, chatId?: string): void {
   if (!rawCoreText || !needsCodexLogin(rawCoreText)) return;
+  if (chatId) pendingChatIds.add(chatId);
 
   if (loginInProgress) {
     log.info("Codex device auth already in progress; skipping duplicate trigger");
@@ -50,7 +59,8 @@ export function maybeStartCodexDeviceAuth(rawCoreText: string): void {
 }
 
 async function runCodexDeviceAuth(): Promise<void> {
-  log.warn("Codex auth error detected. Running: codex login --device-auth");
+  log.warn("Codex auth required. Starting `codex login --device-auth` now.");
+  log.warn("Complete device auth using the URL/code printed below in this Arisa terminal.");
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
@@ -68,8 +78,32 @@ async function runCodexDeviceAuth(): Promise<void> {
 
   const exitCode = await proc.exited;
   if (exitCode === 0) {
-    log.info("Codex device auth finished successfully");
+    log.info("Codex device auth finished successfully. You can retry your message.");
+    await notifySuccess();
   } else {
     log.error(`Codex device auth finished with exit code ${exitCode}`);
+    pendingChatIds.clear();
   }
+}
+
+async function notifySuccess(): Promise<void> {
+  if (!notifyFn || pendingChatIds.size === 0) return;
+
+  const text = [
+    "<b>Codex login completed successfully.</b>",
+    "Then try again.",
+  ].join("\n");
+
+  const chats = Array.from(pendingChatIds);
+  pendingChatIds.clear();
+
+  await Promise.all(
+    chats.map(async (chatId) => {
+      try {
+        await notifyFn?.(chatId, text);
+      } catch (error) {
+        log.error(`Failed to send Codex login success notice to ${chatId}: ${error}`);
+      }
+    }),
+  );
 }
