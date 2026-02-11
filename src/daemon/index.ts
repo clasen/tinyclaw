@@ -76,9 +76,9 @@ telegram.onMessage(async (msg) => {
     });
     clearInterval(typingInterval);
 
-    // Convert markdown to HTML first, then chunk the HTML
-    // (chunking must happen after HTML conversion so tag-aware splitting works)
-    const raw = (response.text || "").replace(/\n---CHUNK---\n/g, "\n");
+    const raw = response.text || "";
+    const messageParts = raw.split(/\n---CHUNK---\n/g);
+    let sentText = false;
 
     // Send audio first if present (voice messages should arrive before text)
     if (response.audio) {
@@ -89,13 +89,15 @@ telegram.onMessage(async (msg) => {
       }
     }
 
-    // Only send text if non-empty (voice-only responses may have empty text)
-    if (raw.trim()) {
-      const html = markdownToTelegramHtml(raw);
+    // Convert markdown to HTML first, then chunk the HTML
+    // (chunking must happen after HTML conversion so tag-aware splitting works)
+    for (const part of messageParts) {
+      if (!part.trim()) continue;
+      const html = markdownToTelegramHtml(part);
       const chunks = chunkMessage(html);
 
-      log.info(`Format | rawChars: ${raw.length} | htmlChars: ${html.length} | chunks: ${chunks.length}`);
-      log.debug(`Format raw >>>>\n${raw}\n<<<<`);
+      log.info(`Format | rawChars: ${part.length} | htmlChars: ${html.length} | chunks: ${chunks.length}`);
+      log.debug(`Format raw >>>>\n${part}\n<<<<`);
       log.debug(`Format html >>>>\n${html}\n<<<<`);
 
       for (const chunk of chunks) {
@@ -113,6 +115,7 @@ telegram.onMessage(async (msg) => {
           }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
         }
       }
+      sentText = true;
     }
 
     if (response.files) {
@@ -122,7 +125,7 @@ telegram.onMessage(async (msg) => {
     }
 
     // If neither text nor audio was sent, don't leave the user hanging
-    if (!raw.trim() && !response.audio) {
+    if (!sentText && !response.audio) {
       log.warn("Empty response from Core — no text or audio to send");
     }
   } catch (error) {
