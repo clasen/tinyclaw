@@ -3,11 +3,11 @@
 
 INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name')
-ARISA_LOGFILE="$CLAUDE_PROJECT_DIR/.arisa/logs/activity.log"
+ARISA_LOGFILE="${ARISA_DATA_DIR:-$HOME/.arisa}/logs/activity.log"
 LEGACY_LOGFILE="$CLAUDE_PROJECT_DIR/.tinyclaw/logs/activity.log"
 LOGFILE="$ARISA_LOGFILE"
 
-if [[ ! -d "$CLAUDE_PROJECT_DIR/.arisa" && -d "$CLAUDE_PROJECT_DIR/.tinyclaw" ]]; then
+if [[ ! -d "${ARISA_DATA_DIR:-$HOME/.arisa}" && -d "$CLAUDE_PROJECT_DIR/.tinyclaw" ]]; then
   LOGFILE="$LEGACY_LOGFILE"
 fi
 

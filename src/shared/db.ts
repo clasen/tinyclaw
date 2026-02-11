@@ -13,24 +13,78 @@ import DeepBase from "deepbase";
 import { config } from "./config";
 import type { ScheduledTask, AttachmentRecord, MessageRecord } from "./types";
 import { DeepbaseSecure } from "./deepbase-secure";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "fs";
 import { randomBytes } from "crypto";
 import { dirname } from "path";
 
 const DB_PATH = `${config.arisaDir}/db`;
+const ARISA_DB_FILE = `${DB_PATH}/arisa.json`;
+const LEGACY_DB_FILE = `${DB_PATH}/tinyclaw.json`;
 
-function resolveDbName(): string {
-  const arisaDb = `${DB_PATH}/arisa.json`;
-  const legacyDb = `${DB_PATH}/tinyclaw.json`;
-  if (existsSync(arisaDb)) return "arisa";
-  if (existsSync(legacyDb)) return "tinyclaw";
-  return "arisa";
+function readDbJson(path: string): Record<string, any> {
+  try {
+    if (!existsSync(path)) return {};
+    const raw = readFileSync(path, "utf8").trim();
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
+
+function mergeLegacyIntoArisa(): void {
+  if (!existsSync(LEGACY_DB_FILE)) return;
+
+  // If arisa DB doesn't exist yet, seed it from legacy and keep legacy file as backup/history.
+  if (!existsSync(ARISA_DB_FILE)) {
+    try {
+      mkdirSync(DB_PATH, { recursive: true });
+      copyFileSync(LEGACY_DB_FILE, ARISA_DB_FILE);
+    } catch {
+      // Best-effort migration; if copy fails, app can still run on a fresh arisa DB.
+    }
+    return;
+  }
+
+  const arisa = readDbJson(ARISA_DB_FILE);
+  const legacy = readDbJson(LEGACY_DB_FILE);
+  let changed = false;
+
+  for (const [collection, legacyCollection] of Object.entries(legacy)) {
+    if (!legacyCollection || typeof legacyCollection !== "object") continue;
+
+    const arisaCollection = arisa[collection];
+    if (!arisaCollection || typeof arisaCollection !== "object") {
+      arisa[collection] = legacyCollection;
+      changed = true;
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(legacyCollection as Record<string, any>)) {
+      if (!(key in arisaCollection)) {
+        arisaCollection[key] = value;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    try {
+      writeFileSync(ARISA_DB_FILE, JSON.stringify(arisa, null, 4));
+    } catch {
+      // Ignore write failures; runtime will continue with current DB state.
+    }
+  }
+}
+
+// Ensure legacy data is available in arisa DB before DeepBase picks a file.
+mergeLegacyIntoArisa();
 
 // Initialize deepbase with the storage directory
 const db = new DeepBase({
   path: DB_PATH,
-  name: resolveDbName(),
+  name: "arisa",
 });
 
 // Initialize encrypted secrets database

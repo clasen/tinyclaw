@@ -98,7 +98,7 @@ Configured in `.claude/settings.json`:
 
 ## Runtime Data
 
-All runtime data lives under `.arisa/` (gitignored, with automatic fallback to legacy `.tinyclaw/`):
+All runtime data lives under `~/.arisa/` (with automatic migration from legacy project-local `.tinyclaw/` or `.arisa/`):
 - `logs/` — per-component log files (core, daemon, telegram, scheduler)
 - `db/arisa.json` — unified persistence with deepbase
 - `attachments/` — saved media files organized by `{chatId}/`
@@ -108,7 +108,7 @@ All runtime data lives under `.arisa/` (gitignored, with automatic fallback to l
 
 ### Persistence with DeepBase
 
-All persistent data is managed by **deepbase** (`src/shared/db.ts`). Location: `.arisa/db/arisa.json`.
+All persistent data is managed by **deepbase** (`src/shared/db.ts`). Location: `~/.arisa/db/arisa.json`.
 
 | Collection      | Key           | Value type         | Description                              |
 |-----------------|---------------|--------------------|------------------------------------------|

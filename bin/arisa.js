@@ -43,7 +43,6 @@ if (command === "version" || command === "--version" || command === "-v") {
 
 const env = {
   ...process.env,
-  ARISA_DATA_DIR: process.env.ARISA_DATA_DIR || join(process.cwd(), ".arisa"),
 };
 
 let bunArgs;

@@ -70,7 +70,7 @@ const server = await serveWithRetry({
           return Response.json({ error: "Missing message" }, { status: 400 });
         }
 
-        log.info(`Message from ${msg.sender}: ${(msg.text || "[media]").substring(0, 60)}`);
+        log.debug(`Inbound message | chatId=${msg.chatId} | sender=${msg.sender} | type=${msg.text ? "text" : "media"}`);
 
         // Auth gate: require token before anything else
         if (!isAuthorized(msg.chatId)) {
@@ -178,7 +178,7 @@ ${messageText}`;
         // Handle /speak command — generate speech via ElevenLabs
         if (msg.command === "/speak") {
           if (!config.elevenlabsApiKey) {
-            return Response.json({ text: "ELEVENLABS_API_KEY not configured. Add it to .arisa/.env" } as CoreResponse);
+            return Response.json({ text: "ELEVENLABS_API_KEY not configured. Add it to ~/.arisa/.env" } as CoreResponse);
           }
           const textToSpeak = messageText.replace(/^\/speak\s*/, "").trim();
           if (!textToSpeak) {

@@ -108,7 +108,7 @@ export async function getOnboarding(chatId: string): Promise<{ message: string; 
   }
 
   if (!deps.openaiKey) {
-    lines.push("No OpenAI API key — voice and image processing disabled. Add <code>OPENAI_API_KEY</code> to <code>.arisa/.env</code> to enable.");
+    lines.push("No OpenAI API key — voice and image processing disabled. Add <code>OPENAI_API_KEY</code> to <code>~/.arisa/.env</code> to enable.");
   }
 
   return { message: lines.join("\n"), blocking: false };

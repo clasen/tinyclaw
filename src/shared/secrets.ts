@@ -9,7 +9,7 @@
  */
 
 import { join } from "path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync } from "fs";
 import CryptoJS from "crypto-js";
 import { DeepbaseSecure } from "./deepbase-secure";
 import { dataDir } from "./paths";
@@ -36,17 +36,63 @@ function getEncryptionKey(): string {
 }
 
 const encryptionKey = getEncryptionKey();
-const secretsDb = new DeepbaseSecure({
-  path: SECRETS_DB_PATH,
-  name: "secrets",
-  encryptionKey,
-});
+let secretsDb = createSecretsDb();
+
+function createSecretsDb(): DeepbaseSecure {
+  return new DeepbaseSecure({
+    path: SECRETS_DB_PATH,
+    name: "secrets",
+    encryptionKey,
+  });
+}
 
 // Initialize connection
 let connectionPromise: Promise<void> | null = null;
+let recoveredOnce = false;
+
+function looksCorrupted(err: unknown): boolean {
+  const msg = err instanceof Error ? `${err.message}\n${err.stack || ""}` : String(err);
+  return /Malformed UTF-8 data|Unexpected token|JSON|decrypt|invalid/i.test(msg);
+}
+
+function backupCorruptSecretsDb(): void {
+  try {
+    const timestamp = Date.now();
+    for (const file of readdirSync(SECRETS_DB_PATH)) {
+      if (!file.startsWith("secrets")) continue;
+      const src = join(SECRETS_DB_PATH, file);
+      const dst = join(SECRETS_DB_PATH, `${file}.corrupt.${timestamp}`);
+      try {
+        renameSync(src, dst);
+      } catch {
+        // Best-effort backup; ignore per-file failures.
+      }
+    }
+  } catch {
+    // Ignore backup errors; recovery will still retry with a fresh DB handle.
+  }
+}
+
 async function ensureConnected(): Promise<void> {
   if (!connectionPromise) {
-    connectionPromise = secretsDb.connect();
+    connectionPromise = (async () => {
+      try {
+        await secretsDb.connect();
+      } catch (err) {
+        if (!recoveredOnce && looksCorrupted(err)) {
+          recoveredOnce = true;
+          console.warn("[secrets] Encrypted secrets DB looks corrupted; backing up and recreating it.");
+          backupCorruptSecretsDb();
+          secretsDb = createSecretsDb();
+          await secretsDb.connect();
+          return;
+        }
+        throw err;
+      }
+    })().catch((err) => {
+      connectionPromise = null;
+      throw err;
+    });
   }
   await connectionPromise;
 }
@@ -55,8 +101,13 @@ async function ensureConnected(): Promise<void> {
  * Get a secret by key
  */
 export async function getSecret(key: string): Promise<string | undefined> {
-  await ensureConnected();
-  return await secretsDb.get("secrets", key);
+  try {
+    await ensureConnected();
+    return await secretsDb.get("secrets", key);
+  } catch (err) {
+    console.warn(`[secrets] Could not read ${key} from encrypted DB: ${err}`);
+    return undefined;
+  }
 }
 
 /**

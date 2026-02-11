@@ -10,7 +10,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
+import { dirname, join } from "path";
 import { dataDir } from "../shared/paths";
 
 const ENV_PATH = join(dataDir, ".env");
