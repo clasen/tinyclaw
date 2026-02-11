@@ -1,8 +1,10 @@
 # What is Arisa
 
-Arisa is a Bun + TypeScript system that connects Telegram to Claude Code via a two-process architecture: **Daemon** (stable channel I/O) and **Core** (message processing, media, scheduling, Claude CLI with model routing).
+Arisa is a Bun + TypeScript agent runtime with a two-process architecture: **Daemon** (stable channel I/O) and **Core** (message processing, media, scheduling, CLI routing). Telegram is one access channel, not the identity of the system.
 
 Inspired by the architecture of [`jlia0/tinyclaw`](https://github.com/jlia0/tinyclaw).
+
+Arisa is intentionally dynamic: the project grows as the user builds a relationship with it. Many capabilities are added live during real conversations (for example, Whisper support), so the system evolves through use instead of staying static.
 
 ## Commands
 
@@ -176,7 +178,7 @@ Telegram responses are sent with `parse_mode: 'HTML'`. When composing responses 
 When you want to send a voice message to the user, wrap the spoken text in `[VOICE]...[/VOICE]` tags:
 
 ```
-[VOICE]Hola, esto se va a convertir en audio[/VOICE]
+[VOICE]Hello, this will be converted to audio[/VOICE]
 ```
 
 - The text inside `[VOICE]` gets synthesized via ElevenLabs and sent as a Telegram voice message

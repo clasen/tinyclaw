@@ -1,7 +1,7 @@
 {
   "name": "arisa",
   "version": "2.0.0",
-  "description": "Arisa - Telegram AI daemon/core architecture",
+  "description": "Arisa - dynamic agent runtime with daemon/core architecture that evolves through user interaction",
   "preferGlobal": true,
   "bin": {
     "arisa": "./bin/arisa.js"
