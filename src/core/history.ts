@@ -19,6 +19,7 @@ const log = createLogger("core");
 
 const HISTORY_PATH = join(config.arisaDir, "history.jsonl");
 const MAX_ENTRIES_PER_CHAT = 50;
+const FOREIGN_CONTEXT_MAX_AGE_MS = 30 * 60 * 1000;
 
 interface Exchange {
   ts: number;
@@ -47,7 +48,8 @@ export function addExchange(
   response: string,
   backend: "claude" | "codex",
 ) {
-  const entry: Exchange = { ts: Date.now(), chatId, user, response, backend };
+  const normalizedResponse = normalizeResponse(response);
+  const entry: Exchange = { ts: Date.now(), chatId, user, response: normalizedResponse, backend };
   history.push(entry);
 
   // Prune old entries per chat
@@ -97,10 +99,12 @@ export function getForeignContext(
     }
   }
 
+  const cutoff = Date.now() - FOREIGN_CONTEXT_MAX_AGE_MS;
+
   // Get foreign exchanges since then
   const foreign = chatHistory
     .slice(lastOwnIdx + 1)
-    .filter((e) => e.backend !== currentBackend);
+    .filter((e) => e.backend !== currentBackend && e.ts >= cutoff);
 
   if (foreign.length === 0) return "";
 
@@ -161,4 +165,8 @@ export function clearHistory(chatId: string): void {
       log.warn(`Failed to persist history after clear: ${e}`);
     }
   }
+}
+
+function normalizeResponse(response: string): string {
+  return response.replace(/\n---CHUNK---\n/g, "\n").trim();
 }
