@@ -1,13 +1,13 @@
 /**
  * @module daemon/bridge
- * @role HTTP client from Daemon to Core with smart fallback to Claude CLI.
+ * @role HTTP client from Daemon to Core with smart fallback to local AI CLI.
  * @responsibilities
  *   - POST messages to Core at :51777/message
  *   - Respect Core lifecycle state (starting/up/down)
  *   - Wait for Core during startup, fallback only when truly down
- *   - Serialize fallback calls (one claude CLI at a time)
+ *   - Serialize fallback calls (one CLI process at a time)
  * @dependencies shared/config, shared/types, daemon/fallback, daemon/lifecycle
- * @effects Network (HTTP to Core), may spawn Claude CLI process
+ * @effects Network (HTTP to Core), may spawn AI CLI process
  */
 
 import { config } from "../shared/config";
@@ -24,7 +24,7 @@ const RETRY_DELAY = 3000;
 
 type StatusCallback = (text: string) => Promise<void>;
 
-// Serialize fallback calls — only one claude CLI process at a time
+// Serialize fallback calls — only one fallback CLI process at a time
 let fallbackQueue: Promise<string> = Promise.resolve("");
 
 export async function sendToCore(
@@ -104,7 +104,7 @@ async function handleUp(
 }
 
 /**
- * Fallback: call Claude CLI directly. Serialized so only one runs at a time.
+ * Fallback: call local CLI directly (Claude -> Codex). Serialized so only one runs at a time.
  */
 async function runFallback(
   message: IncomingMessage,
@@ -114,14 +114,14 @@ async function runFallback(
 
   if (coreError) {
     const preview = coreError.length > 300 ? coreError.slice(-300) : coreError;
-    await onStatus?.(`Core caido. Error:\n<pre>${escapeHtml(preview)}</pre>\nConsultando a Claude directo...`);
+    await onStatus?.(`Core caido. Error:\n<pre>${escapeHtml(preview)}</pre>\nConsultando fallback directo (Claude/Codex)...`);
   } else {
-    await onStatus?.("Core caido. Consultando a Claude directo...");
+    await onStatus?.("Core caido. Consultando fallback directo (Claude/Codex)...");
   }
 
   const text = message.text || "[non-text message — media not available in fallback mode]";
 
-  // Chain onto the queue so only one claude CLI runs at a time
+  // Chain onto the queue so only one fallback CLI runs at a time
   const result = fallbackQueue.then(() => fallbackClaude(text, coreError ?? undefined));
   fallbackQueue = result.catch(() => "");
 

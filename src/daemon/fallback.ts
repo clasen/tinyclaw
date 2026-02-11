@@ -1,16 +1,17 @@
 /**
  * @module daemon/fallback
- * @role Direct Claude CLI invocation when Core is down.
+ * @role Direct AI CLI invocation when Core is down.
  * @responsibilities
- *   - Call claude CLI directly as emergency fallback
- *   - Include Core error context so Claude can help diagnose
+ *   - Call claude/codex CLI directly as emergency fallback
+ *   - Include Core error context so the model can help diagnose
  * @dependencies shared/config
- * @effects Spawns claude CLI process
+ * @effects Spawns AI CLI process
  * @contract fallbackClaude(message, coreError?) => Promise<string>
  */
 
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { getAgentCliLabel, runWithCliFallback } from "./agent-cli";
 
 const log = createLogger("daemon");
 
@@ -22,34 +23,27 @@ export async function fallbackClaude(message: string, coreError?: string): Promi
   const prompt = systemContext + message;
 
   try {
-    log.warn("Using fallback Claude CLI");
-    const proc = Bun.spawn(
-      ["claude", "--dangerously-skip-permissions", "--model", "sonnet", "-p", prompt],
-      {
-        cwd: config.projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env },
+    const outcome = await runWithCliFallback(prompt, config.claudeTimeout);
+    const result = outcome.result;
+
+    if (!result) {
+      if (outcome.attempted.length === 0) {
+        return "[Fallback mode] Neither Claude nor Codex CLI is available. Core is down and fallback is unavailable.";
       }
-    );
-
-    const timeout = setTimeout(() => {
-      proc.kill();
-    }, config.claudeTimeout);
-
-    const output = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    clearTimeout(timeout);
-
-    if (exitCode !== 0) {
-      const stderr = await new Response(proc.stderr).text();
-      log.error(`Fallback Claude CLI failed (exit=${exitCode}): ${stderr.slice(0, 500)}`);
-      return "[Fallback mode] Claude CLI failed. Core is down and fallback is unavailable. Please check server logs.";
+      log.error(`Fallback failed: ${outcome.failures.join(" | ").slice(0, 500)}`);
+      return "[Fallback mode] Claude and Codex fallback both failed. Core is down and fallback is unavailable. Please check server logs.";
     }
 
-    return output.trim() || "[Fallback mode] Empty response from Claude CLI.";
+    const cli = getAgentCliLabel(result.cli);
+    if (result.partial) {
+      log.warn(`Fallback ${cli} returned output but exited with code ${result.exitCode}`);
+    } else {
+      log.warn(`Using fallback ${cli} CLI`);
+    }
+
+    return result.output || `[Fallback mode] Empty response from ${cli} CLI.`;
   } catch (error) {
-    log.error(`Fallback Claude CLI error: ${error}`);
-    return "[Fallback mode] Could not reach Claude CLI. Core is down and fallback is unavailable. Please check server logs.";
+    log.error(`Fallback CLI error: ${error}`);
+    return "[Fallback mode] Could not reach fallback CLI. Core is down and fallback is unavailable. Please check server logs.";
   }
 }

@@ -1,16 +1,17 @@
 /**
  * @module daemon/autofix
- * @role Auto-diagnose and fix Core crashes using Claude CLI.
+ * @role Auto-diagnose and fix Core crashes using available AI CLI.
  * @responsibilities
- *   - Spawn Claude CLI to analyze crash errors and edit code
+ *   - Spawn Claude/Codex CLI to analyze crash errors and edit code
  *   - Rate-limit attempts (cooldown + max attempts)
  *   - Notify via callback (Telegram)
  * @dependencies shared/config
- * @effects Spawns claude CLI process which may edit project files
+ * @effects Spawns AI CLI process which may edit project files
  */
 
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
+import { getAgentCliLabel, runWithCliFallback } from "./agent-cli";
 
 const log = createLogger("daemon");
 
@@ -29,7 +30,7 @@ export function setAutoFixNotify(fn: NotifyFn) {
 }
 
 /**
- * Attempt to auto-fix a Core crash. Returns true if Claude was invoked successfully.
+ * Attempt to auto-fix a Core crash. Returns true if any CLI produced a usable result.
  */
 export async function attemptAutoFix(error: string): Promise<boolean> {
   const now = Date.now();
@@ -50,7 +51,7 @@ export async function attemptAutoFix(error: string): Promise<boolean> {
   log.info(`Auto-fix: attempt ${attemptCount}/${MAX_ATTEMPTS}`);
   await notifyFn?.(`Auto-fix: intento ${attemptCount}/${MAX_ATTEMPTS}. Analizando error...`);
 
-  // Extract file paths from the error to help Claude focus
+  // Extract file paths from the error to help the fallback model focus
   const fileRefs = error.match(/\/srv\/tinyclaw\/[^\s:)]+/g) || [];
   const uniqueFiles = [...new Set(fileRefs)].slice(0, 5);
   const fileHint = uniqueFiles.length > 0
@@ -73,42 +74,30 @@ Rules:
 - Be fast — read only the files mentioned in the error`;
 
   try {
-    const proc = Bun.spawn(
-      ["claude", "--dangerously-skip-permissions", "--model", "sonnet", "-p", prompt],
-      {
-        cwd: config.projectDir,
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env },
+    const outcome = await runWithCliFallback(prompt, AUTOFIX_TIMEOUT);
+    const result = outcome.result;
+
+    if (!result) {
+      if (outcome.attempted.length === 0) {
+        log.error("Auto-fix: no AI CLI available (claude/codex)");
+        await notifyFn?.("Auto-fix: no hay CLI disponible (Claude/Codex).");
+      } else {
+        const detail = outcome.failures.join(" | ").slice(0, 400);
+        log.error(`Auto-fix: all CLIs failed: ${detail}`);
+        await notifyFn?.("Auto-fix: Claude y Codex fallaron. Revisá los logs.");
       }
-    );
-
-    const timeout = setTimeout(() => {
-      proc.kill();
-    }, AUTOFIX_TIMEOUT);
-
-    const output = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    clearTimeout(timeout);
-
-    const hasOutput = output.trim().length > 0;
-
-    if (exitCode !== 0 && !hasOutput) {
-      // Claude failed without producing any output — real failure
-      const stderr = await new Response(proc.stderr).text();
-      log.error(`Auto-fix: Claude CLI failed (exit=${exitCode}): ${stderr.slice(0, 500)}`);
-      await notifyFn?.("Auto-fix: Claude CLI falló sin producir resultado. Revisá los logs.");
       return false;
     }
 
-    // Claude produced output — it attempted a fix (even if exit code is non-zero,
-    // it may have edited files before encountering a secondary issue)
-    const summary = output.trim().slice(0, 300);
-    if (exitCode !== 0) {
-      log.warn(`Auto-fix: Claude exited with code ${exitCode} but produced output — treating as attempted fix`);
+    const cli = getAgentCliLabel(result.cli);
+    const summary = result.output.slice(0, 300);
+    if (result.partial) {
+      log.warn(`Auto-fix: ${cli} produced output but exited with code ${result.exitCode}`);
+    } else {
+      log.info(`Auto-fix: ${cli} completed successfully`);
     }
-    log.info(`Auto-fix: Claude completed. Output: ${summary}`);
-    await notifyFn?.(`Auto-fix aplicado. Core reiniciando...\n<pre>${escapeHtml(summary)}</pre>`);
+
+    await notifyFn?.(`Auto-fix aplicado con ${cli}. Core reiniciando...\n<pre>${escapeHtml(summary)}</pre>`);
     return true;
   } catch (err) {
     log.error(`Auto-fix: error: ${err}`);
