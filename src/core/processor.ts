@@ -112,7 +112,7 @@ async function processNext() {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log.error(`Claude execution error: ${msg}`);
-    resolve("Error processing your message. Please try again.");
+    resolve(`Error: ${summarizeError(msg)}`);
   } finally {
     processing = false;
     processNext();
@@ -158,12 +158,13 @@ async function runClaude(message: string, chatId: string): Promise<string> {
   const duration = Date.now() - start;
 
   if (exitCode !== 0) {
+    const combined = stdout + stderr;
     log.error(`Claude exited with code ${exitCode}: ${stderr.substring(0, 200)}`);
     logActivity("claude", model.model, duration, `error:${exitCode}`);
-    if (isRateLimit(stdout + stderr)) {
-      return "Claude hit its rate limit. Try again in a few minutes.";
+    if (isRateLimit(combined)) {
+      return "Rate limit alcanzado. Intentá de nuevo en unos minutos.";
     }
-    return "Error processing your message. Please try again.";
+    return `Error (exit ${exitCode}): ${summarizeError(stderr || stdout)}`;
   }
 
   const response = stdout.trim();
@@ -248,6 +249,13 @@ export async function processWithCodex(message: string): Promise<string> {
   }
 
   return response;
+}
+
+function summarizeError(raw: string): string {
+  const clean = raw.replace(/\s+/g, " ").trim();
+  if (!clean) return "proceso terminó sin detalle.";
+  // Cap at 200 chars for Telegram readability
+  return clean.length > 200 ? clean.slice(0, 200) + "..." : clean;
 }
 
 function isRateLimit(output: string): boolean {

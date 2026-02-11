@@ -37,6 +37,7 @@ export interface CoreRequest {
 export interface CoreResponse {
   text: string;
   files?: string[];
+  audio?: string;
 }
 
 export interface SendRequest {
@@ -97,5 +98,6 @@ export interface Channel {
   onMessage(handler: (msg: IncomingMessage) => void): void;
   send(chatId: string, text: string, parseMode?: "HTML" | "plain"): Promise<number | undefined>;
   sendFile(chatId: string, filePath: string): Promise<void>;
+  sendAudio?(chatId: string, filePath: string): Promise<void>;
   sendTyping(chatId: string): Promise<void>;
 }

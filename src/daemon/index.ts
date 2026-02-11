@@ -45,27 +45,40 @@ telegram.onMessage(async (msg) => {
 
     // Convert markdown to HTML first, then chunk the HTML
     // (chunking must happen after HTML conversion so tag-aware splitting works)
-    const raw = response.text.replace(/\n---CHUNK---\n/g, "\n");
-    const html = markdownToTelegramHtml(raw);
-    const chunks = chunkMessage(html);
+    const raw = (response.text || "").replace(/\n---CHUNK---\n/g, "\n");
 
-    log.info(`Format | rawChars: ${raw.length} | htmlChars: ${html.length} | chunks: ${chunks.length}`);
-    log.debug(`Format raw >>>>\n${raw}\n<<<<`);
-    log.debug(`Format html >>>>\n${html}\n<<<<`);
+    // Send audio first if present (voice messages should arrive before text)
+    if (response.audio) {
+      try {
+        await telegram.sendAudio(msg.chatId, response.audio);
+      } catch (error) {
+        log.error(`Audio send failed: ${error}`);
+      }
+    }
 
-    for (const chunk of chunks) {
-      log.debug(`Sending chunk (${chunk.length} chars) >>>>\n${chunk}\n<<<<`);
-      const sentId = await telegram.send(msg.chatId, chunk);
-      if (sentId) {
-        saveMessageRecord({
-          id: `${msg.chatId}_${sentId}`,
-          chatId: msg.chatId,
-          messageId: sentId,
-          direction: "out",
-          sender: "TinyClaw",
-          timestamp: Date.now(),
-          text: chunk,
-        }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
+    // Only send text if non-empty (voice-only responses may have empty text)
+    if (raw.trim()) {
+      const html = markdownToTelegramHtml(raw);
+      const chunks = chunkMessage(html);
+
+      log.info(`Format | rawChars: ${raw.length} | htmlChars: ${html.length} | chunks: ${chunks.length}`);
+      log.debug(`Format raw >>>>\n${raw}\n<<<<`);
+      log.debug(`Format html >>>>\n${html}\n<<<<`);
+
+      for (const chunk of chunks) {
+        log.debug(`Sending chunk (${chunk.length} chars) >>>>\n${chunk}\n<<<<`);
+        const sentId = await telegram.send(msg.chatId, chunk);
+        if (sentId) {
+          saveMessageRecord({
+            id: `${msg.chatId}_${sentId}`,
+            chatId: msg.chatId,
+            messageId: sentId,
+            direction: "out",
+            sender: "TinyClaw",
+            timestamp: Date.now(),
+            text: chunk,
+          }).catch((e) => log.error(`Failed to save outgoing message record: ${e}`));
+        }
       }
     }
 
@@ -74,11 +87,18 @@ telegram.onMessage(async (msg) => {
         await telegram.sendFile(msg.chatId, filePath);
       }
     }
+
+    // If neither text nor audio was sent, don't leave the user hanging
+    if (!raw.trim() && !response.audio) {
+      log.warn("Empty response from Core — no text or audio to send");
+    }
   } catch (error) {
     clearInterval(typingInterval);
-    log.error(`Failed to process message from ${msg.sender}: ${error}`);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Failed to process message from ${msg.sender}: ${errMsg}`);
     try {
-      await telegram.send(msg.chatId, "Error processing your message. Please try again.", "plain");
+      const summary = errMsg.length > 200 ? errMsg.slice(0, 200) + "..." : errMsg;
+      await telegram.send(msg.chatId, `Error: ${summary}`, "plain");
     } catch {
       log.error("Failed to send error message back to user");
     }

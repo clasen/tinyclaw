@@ -42,6 +42,8 @@ export const config = {
 
   telegramBotToken: env("TELEGRAM_BOT_TOKEN") || "",
   openaiApiKey: env("OPENAI_API_KEY") || "",
+  elevenlabsApiKey: env("ELEVENLABS_API_KEY") || "",
+  elevenlabsVoiceId: "AkQ5y6bnGscgSIAsRlwZ",
 
   logsDir: join(PROJECT_DIR, ".tinyclaw", "logs"),
   tasksFile: join(PROJECT_DIR, ".tinyclaw", "scheduler", "tasks.json"),

@@ -16,7 +16,7 @@ import { createLogger } from "../shared/logger";
 import { serveWithRetry, claimProcess } from "../shared/ports";
 import type { IncomingMessage, CoreResponse, ScheduledTask } from "../shared/types";
 import { processWithClaude, processWithCodex } from "./processor";
-import { transcribeAudio, describeImage, isMediaConfigured } from "./media";
+import { transcribeAudio, describeImage, generateSpeech, isMediaConfigured, isSpeechConfigured } from "./media";
 import { detectFiles } from "./file-detector";
 
 import { addExchange, getForeignContext, clearHistory } from "./history";
@@ -170,6 +170,28 @@ ${messageText}`;
           log.info(`Backend switched to claude for chat ${msg.chatId}`);
           const response: CoreResponse = { text: "Claude mode activated. Use /codex to switch back." };
           return Response.json(response);
+        }
+
+        // Handle /speak command — generate speech via ElevenLabs
+        if (msg.command === "/speak") {
+          if (!config.elevenlabsApiKey) {
+            return Response.json({ text: "ELEVENLABS_API_KEY not configured. Add it to .tinyclaw/.env" } as CoreResponse);
+          }
+          const textToSpeak = messageText.replace(/^\/speak\s*/, "").trim();
+          if (!textToSpeak) {
+            return Response.json({ text: "Usage: /speak <text to convert to speech>" } as CoreResponse);
+          }
+          try {
+            const audioPath = await generateSpeech(textToSpeak);
+            const response: CoreResponse = {
+              text: "",
+              audio: audioPath,
+            };
+            return Response.json(response);
+          } catch (error) {
+            log.error(`Speech generation failed: ${error}`);
+            return Response.json({ text: "Failed to generate speech. Check logs for details." } as CoreResponse);
+          }
         }
 
         // Process media first — track metadata for message ledger
@@ -326,12 +348,13 @@ ${messageText}`;
           try {
             agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
           } catch (error) {
+            const errMsg = error instanceof Error ? error.message : String(error);
             if (canFallback) {
-              log.warn(`Claude threw, falling back to Codex: ${error}`);
+              log.warn(`Claude threw, falling back to Codex: ${errMsg}`);
               agentResponse = await processWithCodex(enrichedMessage);
               usedBackend = "codex";
             } else {
-              agentResponse = "Error processing your message. Please try again.";
+              agentResponse = `Error de Claude: ${errMsg.slice(0, 200)}`;
             }
           }
         }
@@ -342,22 +365,45 @@ ${messageText}`;
         log.info(`Response | backend: ${usedBackend} | responseChars: ${agentResponse.length}`);
         log.debug(`Response raw >>>>\n${agentResponse}\n<<<<`);
 
+        // Detect [VOICE]...[/VOICE] tags — generate speech via ElevenLabs
+        let audioPath: string | undefined;
+        let textResponse = agentResponse;
+
+        const voiceMatch = agentResponse.match(/\[VOICE\]([\s\S]*?)\[\/VOICE\]/);
+        if (voiceMatch && isSpeechConfigured()) {
+          const speechText = voiceMatch[1].trim();
+          textResponse = agentResponse.replace(/\[VOICE\][\s\S]*?\[\/VOICE\]/, "").trim();
+          try {
+            audioPath = await generateSpeech(speechText, config.elevenlabsVoiceId);
+            log.info(`Speech generated for ${speechText.length} chars`);
+          } catch (error) {
+            log.error(`Speech generation failed: ${error}`);
+            // Fallback: send the voice text as regular text so the message isn't empty
+            if (!textResponse) {
+              textResponse = speechText;
+            }
+          }
+        }
+
         // Prepend onboarding info if first message (non-blocking)
         const fullResponse = onboarding
-          ? onboarding.message + "\n\n" + agentResponse
-          : agentResponse;
+          ? onboarding.message + "\n\n" + textResponse
+          : textResponse;
 
-        const files = detectFiles(agentResponse);
+        const files = detectFiles(textResponse);
 
         const response: CoreResponse = {
           text: fullResponse,
           files: files.length > 0 ? files : undefined,
+          audio: audioPath,
         };
 
         return Response.json(response);
       } catch (error) {
-        log.error(`Request processing error: ${error}`);
-        return Response.json({ error: "Internal error" }, { status: 500 });
+        const errMsg = error instanceof Error ? error.message : String(error);
+        log.error(`Request processing error: ${errMsg}`);
+        const summary = errMsg.length > 200 ? errMsg.slice(0, 200) + "..." : errMsg;
+        return Response.json({ text: `Error interno: ${summary}` } as CoreResponse);
       }
     }
 

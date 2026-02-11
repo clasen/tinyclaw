@@ -269,6 +269,16 @@ export class TelegramChannel implements Channel {
     }
   }
 
+  async sendAudio(chatId: string, filePath: string): Promise<void> {
+    try {
+      await this.bot.api.sendVoice(chatId, new InputFile(filePath));
+      log.info(`Sent audio to ${chatId}: ${filePath}`);
+    } catch (error) {
+      log.error(`Audio send error: ${error}`);
+      throw error;
+    }
+  }
+
   async sendTyping(chatId: string): Promise<void> {
     try {
       await this.bot.api.sendChatAction(chatId, "typing");

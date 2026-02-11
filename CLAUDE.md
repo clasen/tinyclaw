@@ -16,7 +16,7 @@ bun run dev              # Start Core only with hot-reload (for development)
 Daemon (:51778)                         Core (:51777)
 ├── Telegram adapter (grammy)           ├── HTTP server /message, /health
 ├── HTTP server /send (for scheduler)   ├── Claude CLI with model routing
-├── Bridge: HTTP client to Core         ├── Media: voice (Whisper) + vision
+├── Bridge: HTTP client to Core         ├── Media: voice (Whisper), vision, speech (ElevenLabs)
 ├── Lifecycle: spawn Core --watch       ├── Scheduler (croner)
 └── In-memory queue if Core is down     ├── Format: HTML + chunking
                                         └── File detection in responses
@@ -52,7 +52,7 @@ src/
 │   ├── index.ts            # HTTP server with /message and /health endpoints
 │   ├── processor.ts        # Executes claude CLI with model routing
 │   ├── router.ts           # Selects model (haiku/sonnet/opus) by message pattern
-│   ├── media.ts            # Voice transcription (Whisper) + image analysis (Vision)
+│   ├── media.ts            # Voice transcription (Whisper), image analysis (Vision), speech synthesis (ElevenLabs)
 │   ├── scheduler.ts        # Cron + one-time tasks with croner, persists via deepbase
 │   ├── format.ts           # Telegram chunking (4096 char limit)
 │   ├── file-detector.ts    # Detect file paths in responses for auto-sending
@@ -72,6 +72,15 @@ The router (`src/core/router.ts`) selects Claude models based on message pattern
 - **Sonnet** (default): General conversation, queries
 - **Opus**: Code changes, debugging, complex multi-step tasks
 
+## Bot Commands
+
+Available Telegram bot commands:
+- `/reset` — Clear conversation history and start fresh
+- `/cancel` — Cancel all scheduled tasks for this chat
+- `/claude` — Switch to Claude backend (default)
+- `/codex` — Switch to Codex backend
+- `/speak <text>` — Generate speech from text using ElevenLabs (requires ELEVENLABS_API_KEY)
+
 ## Adding a New Channel
 
 Implement the `Channel` interface from `src/shared/types.ts` and register it in `src/daemon/index.ts`. The interface requires: `connect()`, `onMessage()`, `send()`, `sendFile()`.
@@ -88,7 +97,7 @@ All runtime data lives under `.tinyclaw/` (gitignored):
 - `logs/` — per-component log files (core, daemon, telegram, scheduler)
 - `db/tinyclaw.json` — unified persistence with deepbase
 - `attachments/` — saved media files organized by `{chatId}/`
-- `.env` — TELEGRAM_BOT_TOKEN, OPENAI_API_KEY
+- `.env` — TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, ELEVENLABS_API_KEY
 - `voice_temp/` — temporary directory for voice transcription
 - `reset_flag` — conversation reset marker
 
@@ -116,11 +125,10 @@ Telegram responses are sent with `parse_mode: 'HTML'`. When composing responses 
 
 ## Workflow Orchestration
 
-### 1. Plan Mode Default
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
-- If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps, not just building
-- Write detailed specs upfront to reduce ambiguity
+### 1. Plan Mode (On Request Only)
+- Do NOT enter plan mode automatically — only when the user explicitly asks for it
+- If something goes sideways, STOP and re-assess, but don't force plan mode
+- When user requests planning: write detailed specs upfront to reduce ambiguity
 
 ### 2. Subagent Strategy to keep main context window clean
 - Offload research, exploration, and parallel analysis to subagents
@@ -158,6 +166,20 @@ Telegram responses are sent with `parse_mode: 'HTML'`. When composing responses 
 4. **Explain Changes**: High-level summary at each step
 5. **Document Results**: Add review to 'tasks/todo.md'
 6. **Capture Lessons**: Update 'tasks/lessons.md' after corrections
+
+## Voice Messages (ElevenLabs)
+
+When you want to send a voice message to the user, wrap the spoken text in `[VOICE]...[/VOICE]` tags:
+
+```
+[VOICE]Hola, esto se va a convertir en audio[/VOICE]
+```
+
+- The text inside `[VOICE]` gets synthesized via ElevenLabs and sent as a Telegram voice message
+- The `[VOICE]` tags are stripped from the text response — only the audio is sent
+- Use it when the user asks you to "hablame", "mandame un audio", "decime con voz", etc.
+- Keep voice texts concise — long texts cost more and take longer to generate
+- You can combine voice with text: write a text response AND include a `[VOICE]` block
 
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
