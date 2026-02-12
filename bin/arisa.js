@@ -575,7 +575,7 @@ if (isRoot()) {
     step(true, "Systemd service enabled (auto-starts on reboot)");
 
     process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/arisa"], {
+    const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts"], {
       stdio: "inherit",
     });
 
@@ -604,7 +604,7 @@ Arisa management:
   if (isDefaultInvocation) {
     if (!isArisaConfigured()) {
       process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
-      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/arisa"], {
+      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts"], {
         stdio: "inherit",
       });
       process.stdout.write(`
@@ -640,7 +640,7 @@ Arisa management:
     case "daemon":
     case "run": {
       // Explicit "arisa daemon/run" → foreground as arisa user
-      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/arisa"], {
+      const su = spawnSync("su", ["-", "arisa", "-c", "/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts"], {
         stdio: "inherit",
       });
       process.exit(su.status ?? 1);
