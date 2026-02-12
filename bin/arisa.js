@@ -465,7 +465,7 @@ function provisionArisaUser() {
     spawnSync("usermod", ["-aG", group, "arisa"], { stdio: "ignore" });
   }
 
-  // 2. Install bun (downloads ~30 MB, may take a minute)
+  // 2. Install bun (curl, not bun — low memory footprint)
   process.stdout.write("  Installing bun (this may take a minute)...\n");
   const bunInstall = runAsInherit("curl -fsSL https://bun.sh/install | bash");
   if (bunInstall.status !== 0) {
@@ -483,30 +483,11 @@ function provisionArisaUser() {
     spawnSync("chown", ["arisa:arisa", profilePath], { stdio: "ignore" });
   }
 
-  // 3. Copy arisa source
-  const dest = "/home/arisa/arisa";
-  spawnSync("cp", ["-r", pkgRoot, dest], { stdio: "pipe" });
-  spawnSync("chown", ["-R", "arisa:arisa", dest], { stdio: "pipe" });
+  // 3. Ensure pkgRoot is readable by arisa user (run from global install, no copy)
+  spawnSync("chmod", ["-R", "o+rX", pkgRoot], { stdio: "ignore" });
+  step(true, `Arisa will run from ${pkgRoot}`);
 
-  // Install deps + global
-  process.stdout.write("  Installing dependencies...\n");
-  const install = runAsInherit("cd ~/arisa && ~/.bun/bin/bun install && ~/.bun/bin/bun add -g .");
-  if (install.status !== 0) {
-    step(false, "Failed to install dependencies");
-    process.exit(1);
-  }
-  step(true, "Arisa installed for arisa");
-
-  // 4. Install AI CLIs (before daemon starts — avoids OOM in low-memory environments)
-  process.stdout.write("  Installing Claude Code CLI...\n");
-  const claudeInstall = runAsInherit("~/.bun/bin/bun add -g @anthropic-ai/claude-code");
-  step(claudeInstall.status === 0, "Claude Code CLI");
-
-  process.stdout.write("  Installing Codex CLI...\n");
-  const codexInstall = runAsInherit("~/.bun/bin/bun add -g @openai/codex");
-  step(codexInstall.status === 0, "Codex CLI");
-
-  // 5. Migrate data
+  // 4. Migrate data
   const rootArisa = "/root/.arisa";
   if (existsSync(rootArisa)) {
     const destArisa = "/home/arisa/.arisa";
@@ -529,11 +510,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=arisa
-WorkingDirectory=/home/arisa/arisa
-ExecStart=/home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts
+WorkingDirectory=${pkgRoot}
+ExecStart=/home/arisa/.bun/bin/bun ${daemonEntry}
 Restart=always
 RestartSec=5
-Environment=ARISA_PROJECT_DIR=/home/arisa/arisa
+Environment=ARISA_PROJECT_DIR=${pkgRoot}
 Environment=BUN_INSTALL=/home/arisa/.bun
 Environment=PATH=/home/arisa/.bun/bin:/usr/local/bin:/usr/bin:/bin
 
@@ -593,7 +574,7 @@ function canUseSystemdSystem() {
 }
 
 function runArisaForeground() {
-  const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && /home/arisa/.bun/bin/bun /home/arisa/arisa/src/daemon/index.ts`], {
+  const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && export ARISA_PROJECT_DIR=${pkgRoot} && /home/arisa/.bun/bin/bun ${daemonEntry}`], {
     stdio: "inherit",
   });
   return su.status ?? 1;
