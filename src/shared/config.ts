@@ -39,6 +39,11 @@ function loadEnvFile(): Record<string, string> {
 
 const envFile = loadEnvFile();
 
+// Inject .env vars into process.env so child processes inherit them
+for (const [key, value] of Object.entries(envFile)) {
+  if (!process.env[key]) process.env[key] = value;
+}
+
 function env(key: string): string | undefined {
   return process.env[key] || envFile[key];
 }

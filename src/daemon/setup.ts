@@ -143,13 +143,13 @@ export async function runSetup(): Promise<boolean> {
   // ─── Phase 2: CLI Installation (first run, interactive) ─────────
 
   if (isFirstRun && process.stdin.isTTY) {
-    await setupClis(inq);
+    await setupClis(inq, vars);
   }
 
   return true;
 }
 
-async function setupClis(inq: typeof import("@inquirer/prompts") | null) {
+async function setupClis(inq: typeof import("@inquirer/prompts") | null, vars: Record<string, string>) {
   let claudeInstalled = isAgentCliInstalled("claude");
   let codexInstalled = isAgentCliInstalled("codex");
 
@@ -202,7 +202,7 @@ async function setupClis(inq: typeof import("@inquirer/prompts") | null) {
     }
     if (doLogin) {
       console.log();
-      await runInteractiveLogin("claude");
+      await runInteractiveLogin("claude", vars);
     }
   }
 
@@ -216,7 +216,7 @@ async function setupClis(inq: typeof import("@inquirer/prompts") | null) {
     }
     if (doLogin) {
       console.log();
-      await runInteractiveLogin("codex");
+      await runInteractiveLogin("codex", vars);
     }
   }
 
@@ -244,7 +244,7 @@ async function installCli(cli: AgentCliName): Promise<boolean> {
   }
 }
 
-async function runInteractiveLogin(cli: AgentCliName): Promise<boolean> {
+async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, string>): Promise<boolean> {
   const args = cli === "claude"
     ? ["setup-token"]
     : ["login", "--device-auth"];
@@ -252,6 +252,43 @@ async function runInteractiveLogin(cli: AgentCliName): Promise<boolean> {
   console.log(`Starting ${cli} login...`);
 
   try {
+    // For claude: capture stdout to extract OAuth token while still showing output
+    if (cli === "claude") {
+      const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
+        stdin: "inherit",
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+
+      let output = "";
+      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        process.stdout.write(chunk);
+        output += chunk;
+      }
+
+      const exitCode = await proc.exited;
+      if (exitCode === 0) {
+        // Extract token (sk-ant-oat01-...) and save to .env
+        const tokenMatch = output.match(/(sk-ant-\S+)/);
+        if (tokenMatch) {
+          vars.CLAUDE_CODE_OAUTH_TOKEN = tokenMatch[1];
+          saveEnv(vars);
+          console.log("  ✓ claude token saved to .env");
+        }
+        console.log(`  ✓ claude login successful`);
+        return true;
+      } else {
+        console.log(`  ✗ claude login failed (exit ${exitCode})`);
+        return false;
+      }
+    }
+
+    // For codex and others: inherit all stdio
     const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
       stdin: "inherit",
       stdout: "inherit",

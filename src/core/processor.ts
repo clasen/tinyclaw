@@ -147,9 +147,12 @@ async function runClaude(message: string, chatId: string): Promise<string> {
 
   const proc = Bun.spawn(buildBunWrappedAgentCliCommand("claude", args), {
     cwd: config.projectDir,
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, CI: "1" },
   });
+  proc.stdin.end();
 
   const timeout = setTimeout(() => {
     log.warn(`Claude timed out after ${model.timeout}ms, killing process`);
