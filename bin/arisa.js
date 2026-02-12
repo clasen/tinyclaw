@@ -497,7 +497,16 @@ function provisionArisaUser() {
   }
   step(true, "Arisa installed for arisa");
 
-  // 4. Migrate data
+  // 4. Install AI CLIs (before daemon starts — avoids OOM in low-memory environments)
+  process.stdout.write("  Installing Claude Code CLI...\n");
+  const claudeInstall = runAsInherit("~/.bun/bin/bun add -g @anthropic-ai/claude-code");
+  step(claudeInstall.status === 0, "Claude Code CLI");
+
+  process.stdout.write("  Installing Codex CLI...\n");
+  const codexInstall = runAsInherit("~/.bun/bin/bun add -g @openai/codex");
+  step(codexInstall.status === 0, "Codex CLI");
+
+  // 5. Migrate data
   const rootArisa = "/root/.arisa";
   if (existsSync(rootArisa)) {
     const destArisa = "/home/arisa/.arisa";
