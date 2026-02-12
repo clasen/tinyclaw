@@ -15,7 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { dataDir } from "../shared/paths";
 import { secrets, setSecret } from "../shared/secrets";
-import { isAgentCliInstalled, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
+import { isAgentCliInstalled, buildBunWrappedAgentCliCommand, isRunningAsRoot, type AgentCliName } from "../shared/ai-cli";
 
 const ENV_PATH = join(dataDir, ".env");
 const SETUP_DONE_KEY = "ARISA_SETUP_COMPLETE";
@@ -230,11 +230,14 @@ async function setupClis(inq: typeof import("@inquirer/prompts") | null, vars: R
 
 async function installCli(cli: AgentCliName): Promise<boolean> {
   try {
-    const proc = Bun.spawn(["bun", "add", "-g", CLI_PACKAGES[cli]], {
+    const cmd = isRunningAsRoot()
+      ? ["su", "-", "arisa", "-c", `export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH && bun add -g ${CLI_PACKAGES[cli]}`]
+      : ["bun", "add", "-g", CLI_PACKAGES[cli]];
+    const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",
     });
-    const timeout = setTimeout(() => proc.kill(), 120_000);
+    const timeout = setTimeout(() => proc.kill(), 180_000);
     const exitCode = await proc.exited;
     clearTimeout(timeout);
     return exitCode === 0;

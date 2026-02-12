@@ -1,12 +1,26 @@
 /**
  * @module shared/ai-cli
  * @role Resolve agent CLI binaries and execute them via Bun runtime.
+ *       When running as root, wraps calls with su - arisa to satisfy
+ *       Claude CLI's non-root requirement.
  */
 
 import { existsSync } from "fs";
 import { delimiter, dirname, join } from "path";
 
 export type AgentCliName = "claude" | "codex";
+
+const ARISA_USER_BUN = "/home/arisa/.bun/bin";
+const ARISA_INK_SHIM = "/home/arisa/.arisa-ink-shim.js";
+const ARISA_BUN_ENV = `export BUN_INSTALL=/home/arisa/.bun && export PATH=${ARISA_USER_BUN}:$PATH`;
+
+export function isRunningAsRoot(): boolean {
+  return process.getuid?.() === 0;
+}
+
+function shellEscape(arg: string): string {
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
 
 function unique(paths: Array<string | null | undefined>): string[] {
   const seen = new Set<string>();
@@ -25,6 +39,14 @@ function cliOverrideEnvVar(cli: AgentCliName): string | undefined {
 }
 
 function candidatePaths(cli: AgentCliName): string[] {
+  if (isRunningAsRoot()) {
+    // When root, CLIs are installed under arisa user's bun
+    return unique([
+      cliOverrideEnvVar(cli),
+      join(ARISA_USER_BUN, cli),
+    ]);
+  }
+
   const bunInstall = process.env.BUN_INSTALL?.trim();
   const bunDir = dirname(process.execPath);
   const fromPath = Bun.which(cli);
@@ -57,6 +79,14 @@ export function isAgentCliInstalled(cli: AgentCliName): boolean {
 const INK_SHIM = join(dirname(new URL(import.meta.url).pathname), "ink-shim.js");
 
 export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]): string[] {
+  if (isRunningAsRoot()) {
+    // Run as arisa user — Claude CLI refuses to run as root
+    const cliPath = resolveAgentCliPath(cli) || join(ARISA_USER_BUN, cli);
+    const shimPath = existsSync(ARISA_INK_SHIM) ? ARISA_INK_SHIM : INK_SHIM;
+    const inner = ["bun", "--preload", shimPath, cliPath, ...args].map(shellEscape).join(" ");
+    return ["su", "-", "arisa", "-c", `${ARISA_BUN_ENV} && ${inner}`];
+  }
+
   const cliPath = resolveAgentCliPath(cli);
   if (!cliPath) {
     throw new Error(`${cli} CLI not found`);
