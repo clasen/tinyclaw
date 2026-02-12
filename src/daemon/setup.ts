@@ -255,81 +255,52 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
   console.log(`Starting ${cli} login...`);
 
   try {
-    // For claude: capture stdout to extract OAuth token while still showing output
+    // For claude: run setup-token with full stdio, then read token from credentials or prompt
     if (cli === "claude") {
+      // Run with inherited stdio — user interacts directly, no output capture
       const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
         stdin: "inherit",
-        stdout: "pipe",
+        stdout: "inherit",
         stderr: "inherit",
       });
 
-      let output = "";
-      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        process.stdout.write(chunk);
-        output += chunk;
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) {
+        console.log(`  ✗ claude login failed (exit ${exitCode})`);
+        return false;
       }
 
-      const exitCode = await proc.exited;
-      if (exitCode === 0) {
-        // Strip ANSI with a state machine (regex can't handle all Ink sequences)
-        function stripAnsi(s: string): string {
-          let out = "";
-          for (let i = 0; i < s.length; i++) {
-            if (s.charCodeAt(i) === 0x1b) {
-              i++;
-              if (i >= s.length) break;
-              if (s[i] === "[") {
-                // CSI: ESC [ <params 0x20-0x3F>* <final 0x40-0x7E>
-                i++;
-                while (i < s.length && s.charCodeAt(i) < 0x40) i++;
-                // i now on final byte, loop will i++
-              } else if (s[i] === "]") {
-                // OSC: ESC ] ... BEL(0x07) or ST(ESC \)
-                i++;
-                while (i < s.length && s.charCodeAt(i) !== 0x07 && s[i] !== "\x1b") i++;
-              } else if (s[i] === "(" || s[i] === ")" || s[i] === "#") {
-                i++; // skip designator byte
-              }
-              // else: 2-byte Fe sequence, already skipped
-            } else if (s.charCodeAt(i) < 0x20 && s[i] !== "\n" && s[i] !== "\r") {
-              // skip control chars
-            } else {
-              out += s[i];
-            }
-          }
-          return out;
-        }
+      // Try to read token from Claude's credentials file
+      const claudeDir = isRunningAsRoot() ? "/home/arisa/.claude" : join(process.env.HOME || "~", ".claude");
+      const credsPath = join(claudeDir, ".credentials.json");
+      let token = "";
 
-        const clean = stripAnsi(output);
-        const startIdx = clean.indexOf("sk-ant-");
-        let token = "";
+      if (existsSync(credsPath)) {
+        try {
+          const creds = JSON.parse(readFileSync(credsPath, "utf8"));
+          token = creds?.claudeAiOauth?.accessToken || "";
+          if (token) console.log(`  ✓ token read from ${credsPath}`);
+        } catch {}
+      }
 
-        if (startIdx >= 0) {
-          let endIdx = clean.indexOf("Store", startIdx);
-          if (endIdx < 0) endIdx = clean.indexOf("Use this", startIdx);
-          if (endIdx < 0) endIdx = startIdx + 200;
+      // If no credentials file, ask user to paste the token
+      if (!token) {
+        console.log("\n  The token was displayed above. Please paste it here:");
+        const pasted = await readLine("  CLAUDE_CODE_OAUTH_TOKEN: ");
+        token = pasted.replace(/\s+/g, "").trim();
+      }
 
-          const tokenArea = clean.substring(startIdx, endIdx);
-          token = tokenArea.replace(/[^A-Za-z0-9_-]/g, "");
-        }
+      if (token && token.startsWith("sk-ant-")) {
+        console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
+        vars.CLAUDE_CODE_OAUTH_TOKEN = token;
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+        saveEnv(vars);
+        console.log("  ✓ claude token saved to .env");
 
-        if (token && token.startsWith("sk-ant-") && token.length > 50 && token.length < 150) {
-          console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
-          vars.CLAUDE_CODE_OAUTH_TOKEN = token;
-          process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-          saveEnv(vars);
-          console.log("  ✓ claude token saved to .env");
-
-          // Also write credentials file for arisa user (belt + suspenders)
-          const claudeDir = isRunningAsRoot() ? "/home/arisa/.claude" : join(process.env.HOME || "~", ".claude");
+        // Also write credentials file for arisa user if it doesn't exist
+        if (!existsSync(credsPath)) {
           try {
             if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
-            const credsPath = join(claudeDir, ".credentials.json");
             const creds = {
               claudeAiOauth: {
                 accessToken: token,
@@ -345,18 +316,13 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
           } catch (e) {
             console.log(`  ⚠ could not write credentials file: ${e}`);
           }
-        } else {
-          console.log(`  ⚠ token extraction failed (indexOf=${startIdx}, len=${token.length})`);
-          if (startIdx >= 0) {
-            console.log(`  [clean] ${clean.substring(startIdx, startIdx + 150).replace(/\n/g, "\\n")}`);
-          }
         }
-        console.log(`  ✓ claude login successful`);
-        return true;
       } else {
-        console.log(`  ✗ claude login failed (exit ${exitCode})`);
-        return false;
+        console.log("  ⚠ no valid token provided");
       }
+
+      console.log(`  ✓ claude login successful`);
+      return true;
     }
 
     // For codex and others: inherit all stdio
