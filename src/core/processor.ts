@@ -150,7 +150,7 @@ async function runClaude(message: string, chatId: string): Promise<string> {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, CI: "1" },
+    env: { ...process.env },
   });
   proc.stdin.end();
 

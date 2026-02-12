@@ -54,17 +54,14 @@ export function isAgentCliInstalled(cli: AgentCliName): boolean {
   return resolveAgentCliPath(cli) !== null;
 }
 
-function resolveRuntime(cli: AgentCliName): string {
-  // Claude Code uses Ink which needs Node.js stdin/setRawMode handling;
-  // bun crashes with "Raw mode is not supported" even in compat mode
-  if (cli === "claude" && Bun.which("node")) return "node";
-  return "bun";
-}
+const INK_SHIM = join(dirname(new URL(import.meta.url).pathname), "ink-shim.js");
 
 export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]): string[] {
   const cliPath = resolveAgentCliPath(cli);
   if (!cliPath) {
     throw new Error(`${cli} CLI not found`);
   }
-  return [resolveRuntime(cli), cliPath, ...args];
+  // Preload shim that patches process.stdin.setRawMode to prevent Ink crash
+  // when running without a TTY (systemd, su -c, etc.)
+  return ["bun", "--preload", INK_SHIM, cliPath, ...args];
 }
