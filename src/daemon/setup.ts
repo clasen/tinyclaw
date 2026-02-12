@@ -300,11 +300,32 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
         if (token && token.startsWith("sk-ant-") && token.length > 50 && token.length < 150) {
           console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
           vars.CLAUDE_CODE_OAUTH_TOKEN = token;
+          process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
           saveEnv(vars);
           console.log("  ✓ claude token saved to .env");
+
+          // Also write credentials file for arisa user (belt + suspenders)
+          const claudeDir = isRunningAsRoot() ? "/home/arisa/.claude" : join(process.env.HOME || "~", ".claude");
+          try {
+            if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+            const credsPath = join(claudeDir, ".credentials.json");
+            const creds = {
+              claudeAiOauth: {
+                accessToken: token,
+                expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+                scopes: ["user:inference", "user:profile"],
+              },
+            };
+            writeFileSync(credsPath, JSON.stringify(creds, null, 2) + "\n");
+            if (isRunningAsRoot()) {
+              Bun.spawnSync(["chown", "-R", "arisa:arisa", claudeDir]);
+            }
+            console.log(`  ✓ credentials written to ${credsPath}`);
+          } catch (e) {
+            console.log(`  ⚠ could not write credentials file: ${e}`);
+          }
         } else {
           console.log(`  ⚠ token extraction failed (indexOf=${startIdx}, len=${token.length})`);
-          // Show what the cleaned text looks like around the token
           if (startIdx >= 0) {
             console.log(`  [clean] ${clean.substring(startIdx, startIdx + 150).replace(/\n/g, "\\n")}`);
           }

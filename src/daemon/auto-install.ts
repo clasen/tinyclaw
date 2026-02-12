@@ -108,12 +108,20 @@ export async function probeCliAuth(): Promise<void> {
     if (!isAgentCliInstalled(cli)) continue;
 
     log.info(`Auth probe: testing ${cli}...`);
+    if (cli === "claude") {
+      const hasToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      const tokenPreview = hasToken ? `${process.env.CLAUDE_CODE_OAUTH_TOKEN!.slice(0, 15)}...` : "NOT SET";
+      log.info(`Auth probe: CLAUDE_CODE_OAUTH_TOKEN=${tokenPreview}`);
+    }
     try {
       const args = cli === "claude"
         ? ["-p", "say ok", "--model", "haiku", "--dangerously-skip-permissions"]
         : ["exec", "--dangerously-bypass-approvals-and-sandbox", "echo ok"];
 
-      const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
+      const cmd = buildBunWrappedAgentCliCommand(cli, args);
+      log.info(`Auth probe cmd: ${cmd.map(c => c.length > 80 ? c.slice(0, 80) + "..." : c).join(" ")}`);
+
+      const proc = Bun.spawn(cmd, {
         stdout: "pipe",
         stderr: "pipe",
         env: { ...process.env },
