@@ -249,7 +249,7 @@ async function handleError(error: string) {
     const preview = error.length > 500 ? error.slice(-500) : error;
     log.warn("Core error detected, notifying and attempting auto-fix...");
     await notifyFn?.(
-      `Error en Core detectado:\n<pre>${escapeHtml(preview)}</pre>\nIntentando arreglar...`
+      `Core error detected:\n<pre>${escapeHtml(preview)}</pre>\nAttempting auto-fix...`
     );
 
     // 2. Run autofix
@@ -257,9 +257,9 @@ async function handleError(error: string) {
 
     // 3. Notify result
     if (fixed) {
-      await notifyFn?.("Auto-fix aplicado. Core se reiniciará automáticamente.");
+      await notifyFn?.("Auto-fix applied. Core will restart automatically.");
     } else {
-      await notifyFn?.("Auto-fix no pudo resolver el error. Revisalo manualmente.");
+      await notifyFn?.("Auto-fix could not resolve the error. Please check manually.");
     }
   } catch (err) {
     log.error(`handleError threw: ${err}`);

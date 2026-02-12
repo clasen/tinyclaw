@@ -54,7 +54,7 @@ async function handleStarting(
   onStatus?: StatusCallback,
 ): Promise<CoreResponse> {
   log.info("Core is starting, waiting for it to be ready...");
-  await onStatus?.("Core iniciando, esperando...");
+  await onStatus?.("Core starting, please wait...");
 
   const ready = await waitForCoreReady(STARTUP_WAIT_MS);
 
@@ -90,7 +90,7 @@ async function handleUp(
   }
 
   log.warn("Core unreachable, retrying in 3s...");
-  await onStatus?.("Core no responde, reintentando...");
+  await onStatus?.("Core not responding, retrying...");
   await sleep(RETRY_DELAY);
 
   try {
@@ -114,9 +114,9 @@ async function runFallback(
 
   if (coreError) {
     const preview = coreError.length > 300 ? coreError.slice(-300) : coreError;
-    await onStatus?.(`Core caido. Error:\n<pre>${escapeHtml(preview)}</pre>\nConsultando fallback directo (Claude/Codex)...`);
+    await onStatus?.(`Core is down. Error:\n<pre>${escapeHtml(preview)}</pre>\nFalling back to direct CLI (Claude/Codex)...`);
   } else {
-    await onStatus?.("Core caido. Consultando fallback directo (Claude/Codex)...");
+    await onStatus?.("Core is down. Falling back to direct CLI (Claude/Codex)...");
   }
 
   const text = message.text || "[non-text message — media not available in fallback mode]";

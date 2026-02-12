@@ -85,7 +85,7 @@ Rules:
       } else {
         const detail = outcome.failures.join(" | ").slice(0, 400);
         log.error(`Auto-fix: all CLIs failed: ${detail}`);
-        await notifyFn?.("Auto-fix: Claude y Codex fallaron. Revisá los logs.");
+        await notifyFn?.("Auto-fix: both Claude and Codex failed. Check the logs.");
       }
       return false;
     }
@@ -98,11 +98,11 @@ Rules:
       log.info(`Auto-fix: ${cli} completed successfully`);
     }
 
-    await notifyFn?.(`Auto-fix aplicado con ${cli}. Core reiniciando...\n<pre>${escapeHtml(summary)}</pre>`);
+    await notifyFn?.(`Auto-fix applied with ${cli}. Core restarting...\n<pre>${escapeHtml(summary)}</pre>`);
     return true;
   } catch (err) {
     log.error(`Auto-fix: error: ${err}`);
-    await notifyFn?.("Auto-fix: error interno. Revisá los logs.");
+    await notifyFn?.("Auto-fix: internal error. Check the logs.");
     return false;
   }
 }
