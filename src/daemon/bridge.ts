@@ -18,7 +18,7 @@ import { getCoreState, getCoreError, waitForCoreReady } from "./lifecycle";
 
 const log = createLogger("daemon");
 
-const CORE_URL = "http://localhost/core";
+const CORE_URL = "http://localhost";
 const STARTUP_WAIT_MS = 15_000;
 const RETRY_DELAY = 3000;
 

@@ -91,7 +91,7 @@ function startHealthCheck() {
       return;
     }
     try {
-      const res = await fetch("http://localhost/core/health", {
+      const res = await fetch("http://localhost/health", {
         signal: AbortSignal.timeout(2000),
         unix: config.coreSocket,
       } as any);

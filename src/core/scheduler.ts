@@ -59,7 +59,7 @@ async function executeTask(task: ScheduledTask) {
     if (!tasks.includes(task) || !result) return;
 
     // Send the processed result to Telegram via Daemon
-    const response = await fetch("http://localhost/daemon/send", {
+    const response = await fetch("http://localhost/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
