@@ -49,16 +49,25 @@ function defaultBackend(): "claude" | "codex" {
 }
 
 function getBackend(chatId: string): "claude" | "codex" {
+  const deps = checkDeps();
+
+  const preferInstalled = (candidate: "claude" | "codex"): "claude" | "codex" => {
+    if (candidate === "claude" && !deps.claude && deps.codex) return "codex";
+    if (candidate === "codex" && !deps.codex && deps.claude) return "claude";
+    return candidate;
+  };
+
   const current = backendState.get(chatId);
-  if (current) return current;
+  if (current) return preferInstalled(current);
 
   const fromHistory = getLastBackend(chatId);
   if (fromHistory) {
-    backendState.set(chatId, fromHistory);
-    return fromHistory;
+    const resolved = preferInstalled(fromHistory);
+    backendState.set(chatId, resolved);
+    return resolved;
   }
 
-  return defaultBackend();
+  return preferInstalled(defaultBackend());
 }
 
 // Initialize auth + scheduler + attachments
@@ -329,9 +338,15 @@ ${messageText}`;
           return Response.json(response);
         }
 
+        const deps = checkDeps();
+        if (!deps.claude && !deps.codex) {
+          return Response.json({
+            text: "No AI CLI is installed. Install at least one:\n<code>bun add -g @anthropic-ai/claude-code</code>\n<code>bun add -g @openai/codex</code>",
+          } as CoreResponse);
+        }
+
         // Route based on current backend state
         const backend = getBackend(msg.chatId);
-        const deps = checkDeps();
         const canFallback = backend === "codex" ? deps.claude : deps.codex;
         let agentResponse: string;
         let historyResponse: string | null = null;
@@ -363,6 +378,11 @@ ${messageText}`;
         } else {
           try {
             agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
+            if (agentResponse.startsWith("Error:") && canFallback) {
+              log.warn("Claude failed, falling back to Codex");
+              agentResponse = await processWithCodex(enrichedMessage);
+              usedBackend = "codex";
+            }
             if (isClaudeRateLimitResponse(agentResponse) && canFallback) {
               log.warn("Claude credits exhausted, falling back to Codex");
               const codexResponse = await processWithCodex(enrichedMessage);

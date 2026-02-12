@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Arisa - dynamic agent runtime with daemon/core architecture that evolves through user interaction",
   "preferGlobal": true,
   "bin": {
