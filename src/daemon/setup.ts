@@ -276,15 +276,36 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
       const exitCode = await proc.exited;
       if (exitCode === 0) {
-        // Step 1: Strip ANSI escape sequences FIRST (their params contain digits/letters)
-        const clean = output
-          .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")       // CSI: ESC [ params final (e.g. ESC[1C)
-          .replace(/\x1b\][^\x07]*\x07/g, "")             // OSC: ESC ] ... BEL
-          .replace(/\x1b[()#][A-Za-z0-9]/g, "")           // 3-byte: ESC ( B, ESC ) 0, ESC # 8
-          .replace(/\x1b./g, "")                           // Remaining 2-byte ESC sequences
-          .replace(/[\x00-\x09\x0b-\x0c\x0e-\x1f]/g, ""); // Control chars (keep \n \r)
+        // Strip ANSI with a state machine (regex can't handle all Ink sequences)
+        function stripAnsi(s: string): string {
+          let out = "";
+          for (let i = 0; i < s.length; i++) {
+            if (s.charCodeAt(i) === 0x1b) {
+              i++;
+              if (i >= s.length) break;
+              if (s[i] === "[") {
+                // CSI: ESC [ <params 0x20-0x3F>* <final 0x40-0x7E>
+                i++;
+                while (i < s.length && s.charCodeAt(i) < 0x40) i++;
+                // i now on final byte, loop will i++
+              } else if (s[i] === "]") {
+                // OSC: ESC ] ... BEL(0x07) or ST(ESC \)
+                i++;
+                while (i < s.length && s.charCodeAt(i) !== 0x07 && s[i] !== "\x1b") i++;
+              } else if (s[i] === "(" || s[i] === ")" || s[i] === "#") {
+                i++; // skip designator byte
+              }
+              // else: 2-byte Fe sequence, already skipped
+            } else if (s.charCodeAt(i) < 0x20 && s[i] !== "\n" && s[i] !== "\r") {
+              // skip control chars
+            } else {
+              out += s[i];
+            }
+          }
+          return out;
+        }
 
-        // Step 2: Find boundaries in clean text
+        const clean = stripAnsi(output);
         const startIdx = clean.indexOf("sk-ant-");
         let token = "";
 
@@ -294,7 +315,6 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
           if (endIdx < 0) endIdx = startIdx + 200;
 
           const tokenArea = clean.substring(startIdx, endIdx);
-          // Step 3: Strip whitespace and any remaining non-token chars
           token = tokenArea.replace(/[^A-Za-z0-9_-]/g, "");
         }
 
