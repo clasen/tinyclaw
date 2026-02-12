@@ -414,7 +414,7 @@ function arisaUserExists() {
 }
 
 function isProvisioned() {
-  return arisaUserExists() && existsSync("/home/arisa/.bun/bin/bun");
+  return arisaUserExists() && existsSync("/home/arisa/.bun/bin/bun") && existsSync(SHARED_ARISA_ROOT);
 }
 
 function isArisaConfigured() {
@@ -438,6 +438,8 @@ function step(ok, msg) {
 }
 
 const ARISA_BUN_ENV = 'export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH';
+const SHARED_ARISA_ROOT = "/opt/arisa/node_modules/arisa";
+const sharedDaemonEntry = join(SHARED_ARISA_ROOT, "src", "daemon", "index.ts");
 
 function runAsInherit(cmd) {
   return spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && ${cmd}`], {
@@ -483,9 +485,13 @@ function provisionArisaUser() {
     spawnSync("chown", ["arisa:arisa", profilePath], { stdio: "ignore" });
   }
 
-  // 3. Ensure pkgRoot is readable by arisa user (run from global install, no copy)
-  spawnSync("chmod", ["-R", "o+rX", pkgRoot], { stdio: "ignore" });
-  step(true, `Arisa will run from ${pkgRoot}`);
+  // 3. Copy global node_modules to shared location (lightweight cp, no bun)
+  const sharedDir = "/opt/arisa";
+  const globalModules = resolve(pkgRoot, "..");
+  mkdirSync(sharedDir, { recursive: true });
+  spawnSync("cp", ["-r", globalModules, join(sharedDir, "node_modules")], { stdio: "pipe" });
+  spawnSync("chown", ["-R", "arisa:arisa", sharedDir], { stdio: "pipe" });
+  step(true, "Arisa copied to /opt/arisa");
 
   // 4. Migrate data
   const rootArisa = "/root/.arisa";
@@ -510,11 +516,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=arisa
-WorkingDirectory=${pkgRoot}
-ExecStart=/home/arisa/.bun/bin/bun ${daemonEntry}
+WorkingDirectory=${SHARED_ARISA_ROOT}
+ExecStart=/home/arisa/.bun/bin/bun ${sharedDaemonEntry}
 Restart=always
 RestartSec=5
-Environment=ARISA_PROJECT_DIR=${pkgRoot}
+Environment=ARISA_PROJECT_DIR=${SHARED_ARISA_ROOT}
 Environment=BUN_INSTALL=/home/arisa/.bun
 Environment=PATH=/home/arisa/.bun/bin:/usr/local/bin:/usr/bin:/bin
 
@@ -574,10 +580,14 @@ function canUseSystemdSystem() {
 }
 
 function runArisaForeground() {
-  const su = spawnSync("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && export ARISA_PROJECT_DIR=${pkgRoot} && /home/arisa/.bun/bin/bun ${daemonEntry}`], {
+  // Detach child + exit parent immediately to free parent bun memory (~50-100MB).
+  // On 1GB VPS, two bun processes trigger OOM.
+  const child = spawn("su", ["-", "arisa", "-c", `${ARISA_BUN_ENV} && export ARISA_PROJECT_DIR=${SHARED_ARISA_ROOT} && exec /home/arisa/.bun/bin/bun ${sharedDaemonEntry}`], {
     stdio: "inherit",
+    detached: true,
   });
-  return su.status ?? 1;
+  child.unref();
+  process.exit(0);
 }
 
 // ── Root guard ──────────────────────────────────────────────────────
@@ -593,7 +603,7 @@ if (isRoot()) {
     }
 
     process.stdout.write("\nStarting interactive setup as user arisa...\n\n");
-    process.exit(runArisaForeground());
+    runArisaForeground(); // exits parent process internally
   }
 
   // Already provisioned — route commands
@@ -612,7 +622,7 @@ if (isRoot()) {
   if (isDefaultInvocation) {
     if (!isArisaConfigured()) {
       process.stdout.write("Arisa is not configured yet. Starting interactive setup...\n\n");
-      process.exit(runArisaForeground());
+      runArisaForeground(); // exits parent process internally
     }
     if (hasSystemd) {
       if (isSystemdActive()) {
@@ -622,13 +632,13 @@ if (isRoot()) {
       }
     }
     // No systemd → foreground
-    process.exit(runArisaForeground());
+    runArisaForeground(); // exits parent process internally
   }
 
   switch (command) {
     case "start":
       if (hasSystemd) process.exit(startSystemdSystem());
-      process.exit(runArisaForeground());
+      runArisaForeground(); // exits parent process internally
       break;
     case "stop":
       if (hasSystemd) process.exit(stopSystemdSystem());
@@ -647,7 +657,7 @@ if (isRoot()) {
       break;
     case "daemon":
     case "run":
-      process.exit(runArisaForeground());
+      runArisaForeground(); // exits parent process internally
     default:
       process.stderr.write(`Unknown command: ${command}\n\n`);
       printHelp();
