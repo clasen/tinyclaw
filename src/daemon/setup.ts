@@ -276,10 +276,10 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
       const exitCode = await proc.exited;
       if (exitCode === 0) {
-        // Extract token (sk-ant-oat01-...) and save to .env
-        const tokenMatch = output.match(/(sk-ant-\S+)/);
+        // Extract token (sk-ant-oat01-...) — may span multiple lines due to terminal wrapping
+        const tokenMatch = output.match(/sk-ant-[A-Za-z0-9_-]+(?:\n[A-Za-z0-9_-]+)*/);
         if (tokenMatch) {
-          vars.CLAUDE_CODE_OAUTH_TOKEN = tokenMatch[1];
+          vars.CLAUDE_CODE_OAUTH_TOKEN = tokenMatch[0].replace(/\n/g, "");
           saveEnv(vars);
           console.log("  ✓ claude token saved to .env");
         }
