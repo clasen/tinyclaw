@@ -276,34 +276,37 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
       const exitCode = await proc.exited;
       if (exitCode === 0) {
-        // Find token in raw output — don't rely on ANSI stripping or line parsing.
-        // Just locate "sk-ant-" and the end boundary, then keep only token chars.
-        const startIdx = output.indexOf("sk-ant-");
+        // Step 1: Strip ANSI escape sequences FIRST (their params contain digits/letters)
+        const clean = output
+          .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")    // CSI: ESC [ params final
+          .replace(/\x1b\][^\x07]*\x07/g, "")          // OSC: ESC ] ... BEL
+          .replace(/\x1b[^[\]]/g, "")                   // Other ESC sequences (ESC + one char)
+          .replace(/[\x00-\x09\x0b-\x0c\x0e-\x1f]/g, ""); // Control chars (keep \n \r)
+
+        // Step 2: Find boundaries in clean text
+        const startIdx = clean.indexOf("sk-ant-");
         let token = "";
 
         if (startIdx >= 0) {
-          // End boundary: look for known text after the token
-          let endIdx = output.indexOf("Store this token", startIdx);
-          if (endIdx < 0) endIdx = output.indexOf("Use this token", startIdx);
-          if (endIdx < 0) endIdx = startIdx + 300;
+          let endIdx = clean.indexOf("Store", startIdx);
+          if (endIdx < 0) endIdx = clean.indexOf("Use this", startIdx);
+          if (endIdx < 0) endIdx = startIdx + 200;
 
-          const tokenArea = output.substring(startIdx, endIdx);
-          // Strip EVERYTHING except token-valid chars: A-Z a-z 0-9 _ -
+          const tokenArea = clean.substring(startIdx, endIdx);
+          // Step 3: Strip whitespace and any remaining non-token chars
           token = tokenArea.replace(/[^A-Za-z0-9_-]/g, "");
         }
 
-        if (token && token.startsWith("sk-ant-") && token.length > 50) {
+        if (token && token.startsWith("sk-ant-") && token.length > 50 && token.length < 150) {
           console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
           vars.CLAUDE_CODE_OAUTH_TOKEN = token;
           saveEnv(vars);
           console.log("  ✓ claude token saved to .env");
         } else {
           console.log(`  ⚠ token extraction failed (indexOf=${startIdx}, len=${token.length})`);
-          // Dump raw bytes around expected position for debugging
+          // Show what the cleaned text looks like around the token
           if (startIdx >= 0) {
-            const raw = output.substring(startIdx, startIdx + 200);
-            const hex = [...raw].map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join(" ");
-            console.log(`  [hex] ${hex.slice(0, 300)}`);
+            console.log(`  [clean] ${clean.substring(startIdx, startIdx + 150).replace(/\n/g, "\\n")}`);
           }
         }
         console.log(`  ✓ claude login successful`);
