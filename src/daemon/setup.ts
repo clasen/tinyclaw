@@ -261,7 +261,6 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
         stdin: "inherit",
         stdout: "pipe",
         stderr: "inherit",
-        env: { ...process.env, COLUMNS: "500" },
       });
 
       let output = "";
@@ -277,14 +276,31 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
       const exitCode = await proc.exited;
       if (exitCode === 0) {
-        // Strip ANSI escape codes, then extract token
-        // COLUMNS=500 prevents wrapping, but handle it as fallback
-        const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-        const tokenMatch = clean.match(/sk-ant-[A-Za-z0-9_-]+(?:\s*\n\s*[A-Za-z0-9_-]+)*/);
-        if (tokenMatch) {
-          vars.CLAUDE_CODE_OAUTH_TOKEN = tokenMatch[0].replace(/\s+/g, "");
+        // Strip ALL ANSI escape sequences and control chars, then extract token line-by-line
+        const clean = output
+          .replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, "")  // CSI sequences
+          .replace(/\x1b[^\x1b]{0,5}/g, "")                 // other ESC sequences
+          .replace(/\r/g, "");                               // carriage returns
+
+        let token = "";
+        for (const line of clean.split("\n")) {
+          const t = line.trim();
+          if (t.startsWith("sk-ant-")) {
+            token = t;
+          } else if (token && t && /^[A-Za-z0-9_-]+$/.test(t)) {
+            token += t;  // continuation line (wrapped token)
+          } else if (token) {
+            break;  // end of token (empty line or text)
+          }
+        }
+
+        if (token) {
+          console.log(`  [debug] token captured: ${token.slice(0, 20)}...${token.slice(-10)} (${token.length} chars)`);
+          vars.CLAUDE_CODE_OAUTH_TOKEN = token;
           saveEnv(vars);
           console.log("  ✓ claude token saved to .env");
+        } else {
+          console.log("  ⚠ could not extract token from output");
         }
         console.log(`  ✓ claude login successful`);
         return true;
