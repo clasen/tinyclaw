@@ -140,10 +140,16 @@ export async function runSetup(): Promise<boolean> {
     console.log(`\nConfig saved to ${ENV_PATH}`);
   }
 
-  // ─── Phase 2: CLI Installation (first run, interactive) ─────────
+  // ─── Phase 2: CLI Installation + Auth ───────────────────────────
 
-  if (isFirstRun && process.stdin.isTTY) {
-    await setupClis(inq, vars);
+  if (process.stdin.isTTY) {
+    if (isFirstRun) {
+      // First run: offer to install missing CLIs + login
+      await setupClis(inq, vars);
+    } else {
+      // Subsequent runs: check if any installed CLI needs auth, offer login
+      await checkCliAuth(inq, vars);
+    }
   }
 
   return true;
@@ -225,6 +231,59 @@ async function setupClis(inq: typeof import("@inquirer/prompts") | null, vars: R
     console.log("  The daemon will auto-install them in the background.\n");
   } else {
     console.log("\n✓ Setup complete!\n");
+  }
+}
+
+/**
+ * On non-first runs, check if installed CLIs are authenticated.
+ * If not, offer to login interactively.
+ */
+async function checkCliAuth(inq: typeof import("@inquirer/prompts") | null, vars: Record<string, string>) {
+  const clis: AgentCliName[] = [];
+  if (isAgentCliInstalled("claude")) clis.push("claude");
+  if (isAgentCliInstalled("codex")) clis.push("codex");
+  if (clis.length === 0) return;
+
+  for (const cli of clis) {
+    const authed = await isCliAuthenticated(cli);
+    if (authed) {
+      console.log(`[setup] ${cli} ✓ authenticated`);
+      continue;
+    }
+
+    console.log(`[setup] ${cli} ✗ not authenticated`);
+    let doLogin = true;
+    if (inq) {
+      doLogin = await inq.confirm({ message: `Log in to ${cli === "claude" ? "Claude" : "Codex"}?`, default: true });
+    } else {
+      const answer = await readLine(`\nLog in to ${cli === "claude" ? "Claude" : "Codex"}? (Y/n): `);
+      doLogin = answer.toLowerCase() !== "n";
+    }
+    if (doLogin) {
+      console.log();
+      await runInteractiveLogin(cli, vars);
+    }
+  }
+}
+
+/**
+ * Quick probe: is this CLI authenticated?
+ * Claude: `claude auth status` exits 0 and contains "loggedIn": true
+ * Codex: `codex auth status` or a quick exec check
+ */
+async function isCliAuthenticated(cli: AgentCliName): Promise<boolean> {
+  try {
+    if (cli === "claude") {
+      const cmd = buildBunWrappedAgentCliCommand("claude", ["auth", "status"], { skipPreload: true });
+      const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+      const stdout = await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      return exitCode === 0 && stdout.includes('"loggedIn": true');
+    }
+    // Codex: no simple auth check, assume OK if installed
+    return true;
+  } catch {
+    return false;
   }
 }
 
