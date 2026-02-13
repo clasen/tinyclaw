@@ -356,17 +356,27 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
     // `claude setup-token` prints a long-lived (1 year) token but does NOT
     // store it. Extract from captured output and save to .env.
     if (isClaudeSetupToken) {
-      // Grab everything from "sk-ant-" onwards, strip whitespace, extract full token
+      // Token lines are purely [A-Za-z0-9_-] with no spaces.
+      // Stop collecting when we hit a line with spaces (e.g. "Store this token...")
       const idx = output.indexOf("sk-ant-");
       if (idx >= 0) {
-        const token = output.substring(idx).split(/\n\n/)[0].replace(/\s+/g, "");
-        if (token.length > 80) {
+        const lines = output.substring(idx).split("\n");
+        let token = "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed && /^[A-Za-z0-9_-]+$/.test(trimmed)) {
+            token += trimmed;
+          } else {
+            break;
+          }
+        }
+        if (token.startsWith("sk-ant-") && token.length > 80) {
           vars.CLAUDE_CODE_OAUTH_TOKEN = token;
           process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
           saveEnv(vars);
           console.log(`  ✓ token saved to .env (${token.length} chars)`);
         } else {
-          console.log(`  ⚠ token looks short (${token.length} chars) — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env`);
+          console.log(`  ⚠ token looks invalid (${token.length} chars) — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env`);
         }
       } else {
         console.log("  ⚠ could not find token in output — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env");
