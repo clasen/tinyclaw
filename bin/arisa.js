@@ -12,7 +12,7 @@ const {
   writeFileSync,
 } = require("node:fs");
 const { homedir, platform } = require("node:os");
-const { join, resolve } = require("node:path");
+const { dirname, join, resolve } = require("node:path");
 
 const pkgRoot = resolve(__dirname, "..");
 const daemonEntry = join(pkgRoot, "src", "daemon", "index.ts");
@@ -486,7 +486,14 @@ if (isRoot() && arisaUserExists()) {
     spawnSync("chown", ["-R", "arisa:arisa", arisaDataDir], { stdio: "ignore" });
   }
 
-  // Ensure arisa can read project files (Core runs as arisa with bun --watch)
+  // Ensure arisa can traverse to and read project files.
+  // When installed globally under /root/.bun/..., parent dirs are mode 700.
+  // Add o+x (traverse only, not read) on each ancestor so arisa can reach pkgRoot.
+  let traverseDir = pkgRoot;
+  while (traverseDir !== "/") {
+    spawnSync("chmod", ["o+x", traverseDir], { stdio: "ignore" });
+    traverseDir = dirname(traverseDir);
+  }
   spawnSync("chmod", ["-R", "o+rX", pkgRoot], { stdio: "ignore" });
 
   // All processes use arisa's data dir (inherited by Daemon → Core)
