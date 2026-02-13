@@ -100,7 +100,7 @@ export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]
     // Run as arisa user — Claude CLI refuses to run as root
     const cliPath = resolveAgentCliPath(cli) || join(ARISA_USER_BUN, cli);
     const shimPath = existsSync(ARISA_INK_SHIM) ? ARISA_INK_SHIM : INK_SHIM;
-    const inner = ["bun", "--preload", shimPath, cliPath, ...args].map(shellEscape).join(" ");
+    const inner = ["bun", "--bun", "--preload", shimPath, cliPath, ...args].map(shellEscape).join(" ");
     // su without "-" preserves parent env (tokens, keys); explicit HOME/PATH for arisa
     return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
   }
@@ -111,5 +111,5 @@ export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]
   }
   // Preload shim that patches process.stdin.setRawMode to prevent Ink crash
   // when running without a TTY (systemd, su -c, etc.)
-  return ["bun", "--preload", INK_SHIM, cliPath, ...args];
+  return ["bun", "--bun", "--preload", INK_SHIM, cliPath, ...args];
 }
