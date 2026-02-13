@@ -3,7 +3,6 @@
 const { spawn, spawnSync } = require("node:child_process");
 const {
   closeSync,
-  cpSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -474,10 +473,8 @@ if (isRoot() && arisaUserExists()) {
 
   // One-time migration from root's data dir
   if (existsSync(rootDataDir) && !existsSync(arisaDataDir)) {
-    try {
-      cpSync(rootDataDir, arisaDataDir, { recursive: true });
-      spawnSync("chown", ["-R", "arisa:arisa", arisaDataDir], { stdio: "ignore" });
-    } catch {}
+    spawnSync("cp", ["-r", rootDataDir, arisaDataDir], { stdio: "ignore" });
+    spawnSync("chown", ["-R", "arisa:arisa", arisaDataDir], { stdio: "ignore" });
   }
 
   // Ensure arisa data dir exists with correct ownership
