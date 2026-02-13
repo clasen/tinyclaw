@@ -125,7 +125,7 @@ export async function probeCliAuth(): Promise<void> {
         : ["exec", "--dangerously-bypass-approvals-and-sandbox", "echo ok"];
 
       const cmd = buildBunWrappedAgentCliCommand(cli, args);
-      log.info(`Auth probe cmd: ${cmd.map(c => c.length > 80 ? c.slice(0, 80) + "..." : c).join(" ")}`);
+      log.info(`Auth probe cmd (${cmd.length} parts):\n${cmd.map((c, i) => `  [${i}] ${c}`).join("\n")}`);
 
       const proc = Bun.spawn(cmd, {
         stdout: "pipe",

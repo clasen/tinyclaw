@@ -142,10 +142,11 @@ async function runClaude(message: string, chatId: string): Promise<string> {
   log.info(
     `Claude send | promptChars: ${prompt.length} | preview: ${previewPrompt(prompt)}`
   );
-  log.info(`Claude spawn | cmd: claude --dangerously-skip-permissions --model ${model.model} -p <prompt>`);
+  const spawnCmd = buildBunWrappedAgentCliCommand("claude", args);
+  log.info(`Claude spawn cmd (${spawnCmd.length} parts):\n${spawnCmd.map((c, i) => `  [${i}] ${c}`).join("\n")}`);
   log.debug(`Claude prompt >>>>\n${prompt}\n<<<<`);
 
-  const proc = Bun.spawn(buildBunWrappedAgentCliCommand("claude", args), {
+  const proc = Bun.spawn(spawnCmd, {
     cwd: config.projectDir,
     stdin: "pipe",
     stdout: "pipe",
@@ -212,14 +213,11 @@ export async function processWithCodex(message: string): Promise<string> {
   log.info(
     `Codex send | promptChars: ${message.length} | preview: ${previewPrompt(message)}`
   );
-  log.info(
-    `Codex spawn | cmd: codex ${continueFlag
-      ? "exec resume --last --dangerously-bypass-approvals-and-sandbox <prompt>"
-      : `exec --dangerously-bypass-approvals-and-sandbox -C ${config.projectDir} <prompt>`}`
-  );
+  const spawnCmd = buildBunWrappedAgentCliCommand("codex", args);
+  log.info(`Codex spawn cmd (${spawnCmd.length} parts):\n${spawnCmd.map((c, i) => `  [${i}] ${c}`).join("\n")}`);
   log.debug(`Codex prompt >>>>\n${message}\n<<<<`);
 
-  const proc = Bun.spawn(buildBunWrappedAgentCliCommand("codex", args), {
+  const proc = Bun.spawn(spawnCmd, {
     cwd: config.projectDir,
     stdout: "pipe",
     stderr: "pipe",
