@@ -14,11 +14,9 @@ Arisa can execute actions with operational control over the system where it runs
 
 ```bash
 curl -fsSL https://bun.sh/install | bash  # Install Bun https://bun.sh
-
-bun add -g @anthropic-ai/claude-code      # Install Claude CLI (both or one is required)
-bun add -g @openai/codex                  # Install Codex CLI (both or one is required)
-
 bun add -g arisa                          # Install Arisa CLI
+
+# @anthropic-ai/claude-code and @openai/codex (auto-installed if missing)
 ```
 
 ## Commands
