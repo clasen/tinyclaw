@@ -44,13 +44,16 @@ function saveEnv(vars: Record<string, string>) {
   writeFileSync(ENV_PATH, content);
 }
 
-// Fallback readline for non-TTY environments
+// Robust readline that survives after child processes inherit stdin
 async function readLine(question: string): Promise<string> {
-  process.stdout.write(question);
-  for await (const line of console) {
-    return line.trim();
-  }
-  return "";
+  const rl = await import("node:readline");
+  const iface = rl.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve) => {
+    iface.question(question, (answer) => {
+      iface.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 export async function runSetup(): Promise<boolean> {
