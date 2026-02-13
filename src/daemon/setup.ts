@@ -320,17 +320,19 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
   console.log(`Starting ${cli} login...`);
 
   try {
-    if (cli === "claude") {
-      // `claude setup-token` generates a long-lived (1 year) OAuth token for
-      // headless/CI environments. It prints the token to stdout but does NOT
-      // write .credentials.json. We must capture it and save to .env.
-      const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
-        stdin: "inherit",
-        stdout: "pipe",
-        stderr: "inherit",
-      });
+    const isClaudeSetupToken = cli === "claude";
 
-      let output = "";
+    // For claude setup-token: pipe stdout to capture token while echoing to terminal.
+    // For others (codex): inherit stdout for full native rendering.
+    const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
+      stdin: "inherit",
+      stdout: isClaudeSetupToken ? "pipe" : "inherit",
+      stderr: "inherit",
+      env: isClaudeSetupToken ? { ...process.env, FORCE_COLOR: "1" } : undefined,
+    });
+
+    let output = "";
+    if (isClaudeSetupToken) {
       const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
       const decoder = new TextDecoder();
       while (true) {
@@ -340,50 +342,38 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
         process.stdout.write(chunk);
         output += chunk;
       }
-
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        console.log(`  ✗ claude login failed (exit ${exitCode})`);
-        return false;
-      }
-
-      // Extract token from output (format: sk-ant-oat01-...)
-      // The CLI wraps long tokens across multiple lines — collect until blank line, strip whitespace.
-      const tokenStartIdx = output.indexOf("sk-ant-oat01-");
-      const tokenArea = tokenStartIdx >= 0
-        ? output.substring(tokenStartIdx, output.indexOf("\n\n", tokenStartIdx) >>> 0 || tokenStartIdx + 200)
-        : "";
-      const tokenMatch = tokenArea ? tokenArea.replace(/\s+/g, "").match(/(sk-ant-oat01-[A-Za-z0-9_-]+)/) : null;
-      if (tokenMatch) {
-        const token = tokenMatch[1];
-        console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
-        vars.CLAUDE_CODE_OAUTH_TOKEN = token;
-        process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-        saveEnv(vars);
-        console.log("  ✓ token saved to .env");
-      } else {
-        console.log("  ⚠ could not extract token from output — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env");
-      }
-
-      console.log(`  ✓ claude login successful`);
-      return true;
     }
 
-    // For codex and others: inherit all stdio
-    const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
     const exitCode = await proc.exited;
 
-    if (exitCode === 0) {
-      console.log(`  ✓ ${cli} login successful`);
-      return true;
-    } else {
+    if (exitCode !== 0) {
       console.log(`  ✗ ${cli} login failed (exit ${exitCode})`);
       return false;
     }
+
+    console.log(`  ✓ ${cli} login successful`);
+
+    // `claude setup-token` prints a long-lived (1 year) token but does NOT
+    // store it. Extract from captured output and save to .env.
+    if (isClaudeSetupToken) {
+      // Grab everything from "sk-ant-" onwards, strip whitespace, extract full token
+      const idx = output.indexOf("sk-ant-");
+      if (idx >= 0) {
+        const token = output.substring(idx).split(/\n\n/)[0].replace(/\s+/g, "");
+        if (token.length > 80) {
+          vars.CLAUDE_CODE_OAUTH_TOKEN = token;
+          process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+          saveEnv(vars);
+          console.log(`  ✓ token saved to .env (${token.length} chars)`);
+        } else {
+          console.log(`  ⚠ token looks short (${token.length} chars) — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env`);
+        }
+      } else {
+        console.log("  ⚠ could not find token in output — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env");
+      }
+    }
+
+    return true;
   } catch (e) {
     console.error(`  Login error: ${e}`);
     return false;
