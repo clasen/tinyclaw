@@ -356,11 +356,18 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
     // `claude setup-token` prints a long-lived (1 year) token but does NOT
     // store it. Extract from captured output and save to .env.
     if (isClaudeSetupToken) {
+      // Ink CLI embeds ANSI escape sequences (cursor, colors, OSC) even with
+      // NO_COLOR. Strip everything non-printable before searching for the token.
+      const clean = output
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")  // CSI sequences
+        .replace(/\x1b\][^\x07]*\x07/g, "")      // OSC sequences
+        .replace(/\x1b[()][A-Z0-9]/g, "")        // Charset sequences
+        .replace(/\r/g, "");                      // Carriage returns
+
       // Token lines are purely [A-Za-z0-9_-] with no spaces.
-      // Stop collecting when we hit a line with spaces (e.g. "Store this token...")
-      const idx = output.indexOf("sk-ant-");
+      const idx = clean.indexOf("sk-ant-");
       if (idx >= 0) {
-        const lines = output.substring(idx).split("\n");
+        const lines = clean.substring(idx).split("\n");
         let token = "";
         for (const line of lines) {
           const trimmed = line.trim();
