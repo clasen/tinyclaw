@@ -1,19 +1,22 @@
 {
   "name": "arisa",
-  "version": "2.3.14",
+  "version": "2.3.16",
   "description": "Arisa - dynamic agent runtime with daemon/core architecture that evolves through user interaction",
   "preferGlobal": true,
   "bin": {
     "arisa": "./bin/arisa.js"
   },
   "files": [
-    "bin",
-    "src",
-    "scripts",
+    "tinyclaw",
+    "clawbot",
+    "moltbot",
+    "openclaw",
+    "agent",
+    "telegram",
+    "jarvis",
     "CLAUDE.md",
     "SOUL.md",
-    "README.md",
-    "tsconfig.json"
+    "clasen"
   ],
   "engines": {
     "node": ">=18",
