@@ -131,7 +131,7 @@ async function runClaudeSetupToken(): Promise<void> {
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn(buildBunWrappedAgentCliCommand("claude", ["setup-token"]), {
+    proc = Bun.spawn(buildBunWrappedAgentCliCommand("claude", ["setup-token"], { skipPreload: true }), {
       cwd: config.projectDir,
       stdin: "pipe",
       stdout: "pipe",

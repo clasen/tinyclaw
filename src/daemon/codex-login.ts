@@ -106,7 +106,7 @@ async function runCodexDeviceAuth(): Promise<void> {
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn(buildBunWrappedAgentCliCommand("codex", ["login", "--device-auth"]), {
+    proc = Bun.spawn(buildBunWrappedAgentCliCommand("codex", ["login", "--device-auth"], { skipPreload: true }), {
       cwd: config.projectDir,
       stdin: "inherit",
       stdout: "pipe",

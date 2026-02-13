@@ -282,7 +282,7 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
   try {
     // For claude: capture stdout to extract OAuth token while still showing output
     if (cli === "claude") {
-      const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
+      const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
         stdin: "inherit",
         stdout: "pipe",
         stderr: "inherit",
@@ -390,7 +390,7 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
     }
 
     // For codex and others: inherit all stdio
-    const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args), {
+    const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",

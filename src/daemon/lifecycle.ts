@@ -61,6 +61,10 @@ export function getCoreState(): CoreState {
   return coreState;
 }
 
+export function setCoreState(state: CoreState) {
+  coreState = state;
+}
+
 export function getCoreError(): string | null {
   return lastError;
 }

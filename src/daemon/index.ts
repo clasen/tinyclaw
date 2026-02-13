@@ -256,6 +256,8 @@ log.info(`Daemon push server listening on ${config.daemonSocket}`);
 // --- Load Core in-process (single bun process, no child spawn) ---
 log.info("Loading Core...");
 await import("../core/index.ts");
+const { setCoreState } = await import("./lifecycle");
+setCoreState("up");
 log.info("Core loaded");
 
 // --- Auto-install missing CLIs (delayed to avoid peak memory) ---

@@ -5,7 +5,7 @@
  *       Claude CLI's non-root requirement.
  */
 
-import { existsSync } from "fs";
+import { existsSync, openSync, readSync, closeSync } from "fs";
 import { delimiter, dirname, join } from "path";
 
 export type AgentCliName = "claude" | "codex";
@@ -96,21 +96,61 @@ function buildEnvExports(): string {
   return exports.length > 0 ? exports.join(" && ") + " && " : "";
 }
 
-export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]): string[] {
+export interface AgentCliOptions {
+  /** Skip the ink-shim preload (useful for interactive login flows). Default: false */
+  skipPreload?: boolean;
+}
+
+/**
+ * Detect native executables (Mach-O, ELF) by reading magic bytes.
+ * Claude Code CLI v2+ ships as a native binary, not a JS script.
+ */
+function isNativeBinary(filePath: string): boolean {
+  try {
+    const fd = openSync(filePath, "r");
+    const buf = Buffer.alloc(4);
+    readSync(fd, buf, 0, 4, 0);
+    closeSync(fd);
+    const magic = buf.readUInt32BE(0);
+    return (
+      magic === 0xCFFAEDFE || // Mach-O 64-bit LE (macOS arm64/x86_64)
+      magic === 0xCEFAEDFE || // Mach-O 32-bit LE
+      magic === 0xFEEDFACF || // Mach-O 64-bit BE
+      magic === 0xFEEDFACE || // Mach-O 32-bit BE
+      magic === 0xCAFEBABE || // Mach-O Universal
+      magic === 0x7F454C46    // ELF (Linux)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[], options?: AgentCliOptions): string[] {
+  const cliPath = isRunningAsRoot()
+    ? (resolveAgentCliPath(cli) || join(ROOT_BUN_BIN, cli))
+    : resolveAgentCliPath(cli);
+
+  if (!cliPath) {
+    throw new Error(`${cli} CLI not found`);
+  }
+
+  // Native binaries (Mach-O, ELF) must be executed directly — bun can't parse them as JS
+  const native = isNativeBinary(cliPath);
+
   if (isRunningAsRoot()) {
     // Run as arisa user — Claude CLI refuses to run as root.
-    // This path is used by Daemon fallback calls; Core runs as arisa directly.
-    const cliPath = resolveAgentCliPath(cli) || join(ROOT_BUN_BIN, cli);
-    const inner = ["bun", "--bun", "--preload", INK_SHIM, cliPath, ...args].map(shellEscape).join(" ");
+    const inner = native
+      ? [cliPath, ...args].map(shellEscape).join(" ")
+      : ["bun", "--bun", ...(!options?.skipPreload ? ["--preload", INK_SHIM] : []), cliPath, ...args].map(shellEscape).join(" ");
     // su without "-" preserves parent env (tokens, keys); explicit HOME/PATH for arisa
     return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
   }
 
-  const cliPath = resolveAgentCliPath(cli);
-  if (!cliPath) {
-    throw new Error(`${cli} CLI not found`);
+  if (native) {
+    return [cliPath, ...args];
   }
-  // Preload shim that patches process.stdin.setRawMode to prevent Ink crash
-  // when running without a TTY (systemd, su -c, etc.)
-  return ["bun", "--bun", "--preload", INK_SHIM, cliPath, ...args];
+
+  // JS/Node scripts: wrap with bun for performance + optional ink-shim preload
+  const preloadArgs = !options?.skipPreload ? ["--preload", INK_SHIM] : [];
+  return ["bun", "--bun", ...preloadArgs, cliPath, ...args];
 }
