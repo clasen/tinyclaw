@@ -33,9 +33,7 @@ const { serveWithRetry, claimProcess, releaseProcess, cleanupSocket } = await im
 const { TelegramChannel } = await import("./channels/telegram");
 const { sendToCore } = await import("./bridge");
 // lifecycle/autofix removed — Core runs in-process, --watch handles restarts
-const { maybeStartCodexDeviceAuth, setCodexLoginNotify } = await import("./codex-login");
-const { maybeStartClaudeSetupToken, maybeFeedClaudeCode, setClaudeLoginNotify, isClaudeLoginPending } = await import("./claude-login");
-const { autoInstallMissingClis, setAutoInstallNotify, setAuthProbeCallback } = await import("./auto-install");
+const { autoInstallMissingClis, setAutoInstallNotify } = await import("./auto-install");
 const { chunkMessage, markdownToTelegramHtml } = await import("../core/format");
 // Message records are saved via Core's /record endpoint to avoid dual-writer
 // conflicts (Daemon and Core sharing the same arisa.json through separate
@@ -95,34 +93,9 @@ const sendToAllChats = async (text: string) => {
 };
 
 setAutoInstallNotify(sendToAllChats);
-setAuthProbeCallback((cli, errorText) => {
-  if (cli === "claude") {
-    // Start Claude setup-token for all known chats
-    for (const chatId of knownChatIds) {
-      maybeStartClaudeSetupToken(errorText, chatId);
-    }
-  } else if (cli === "codex") {
-    // Start Codex device-auth for all known chats
-    for (const chatId of knownChatIds) {
-      maybeStartCodexDeviceAuth(errorText, chatId);
-    }
-  }
-});
-setCodexLoginNotify(async (chatId, text) => {
-  await telegram.send(chatId, text);
-});
-setClaudeLoginNotify(async (chatId, text) => {
-  await telegram.send(chatId, text);
-});
 
 telegram.onMessage(async (msg) => {
   knownChatIds.add(msg.chatId);
-
-  // If Claude login is pending and user sends what looks like an OAuth code, feed it
-  if (isClaudeLoginPending() && msg.text && maybeFeedClaudeCode(msg.chatId, msg.text)) {
-    await telegram.send(msg.chatId, "Code received, authenticating...");
-    return;
-  }
 
   // Keep typing indicator alive while Core processes (expires every ~5s)
   const typingInterval = setInterval(() => telegram.sendTyping(msg.chatId), 4000);
@@ -138,8 +111,6 @@ telegram.onMessage(async (msg) => {
     clearInterval(typingInterval);
 
     const raw = response.text || "";
-    maybeStartCodexDeviceAuth(raw, msg.chatId);
-    maybeStartClaudeSetupToken(raw, msg.chatId);
     const messageParts = raw.split(/\n---CHUNK---\n/g);
     let sentText = false;
 
