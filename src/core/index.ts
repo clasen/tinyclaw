@@ -27,7 +27,6 @@ import {
 import { transcribeAudio, describeImage, generateSpeech, isMediaConfigured, isSpeechConfigured } from "./media";
 import { detectFiles } from "./file-detector";
 
-import { addExchange, getForeignContext, clearHistory, getLastBackend } from "./history";
 import { getOnboarding, checkDeps } from "./onboarding";
 import { initScheduler, addTask, cancelAllChatTasks } from "./scheduler";
 import { detectScheduleIntent } from "./intent";
@@ -59,13 +58,6 @@ function getBackend(chatId: string): "claude" | "codex" {
 
   const current = backendState.get(chatId);
   if (current) return preferInstalled(current);
-
-  const fromHistory = getLastBackend(chatId);
-  if (fromHistory) {
-    const resolved = preferInstalled(fromHistory);
-    backendState.set(chatId, resolved);
-    return resolved;
-  }
 
   return preferInstalled(defaultBackend());
 }
@@ -164,7 +156,6 @@ ${messageText}`;
         if (msg.command === "/reset") {
           const { writeFileSync } = await import("fs");
           writeFileSync(config.resetFlagPath, "reset");
-          clearHistory(msg.chatId);
           const { resetRouterState } = await import("./router");
           resetRouterState();
           const response: CoreResponse = { text: "Conversation reset! Next message will start a fresh conversation." };
@@ -361,27 +352,22 @@ ${messageText}`;
         const backend = getBackend(msg.chatId);
         const canFallback = backend === "codex" ? deps.claude : deps.codex;
         let agentResponse: string;
-        let historyResponse: string | null = null;
         let usedBackend: "claude" | "codex" = backend;
 
-        // Inject cross-backend context if switching
-        const foreignCtx = getForeignContext(msg.chatId, backend);
-        const enrichedMessage = foreignCtx ? foreignCtx + messageText : messageText;
-
-        log.info(`Routing | backend: ${backend} | foreignCtx: ${!!foreignCtx} | enrichedChars: ${enrichedMessage.length}`);
+        log.info(`Routing | backend: ${backend} | messageChars: ${messageText.length}`);
 
         if (backend === "codex") {
           try {
-            agentResponse = await processWithCodex(enrichedMessage);
+            agentResponse = await processWithCodex(messageText);
             if (agentResponse.startsWith("Error processing with Codex") && canFallback) {
               log.warn("Codex failed, falling back to Claude");
-              agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
+              agentResponse = await processWithClaude(messageText, msg.chatId);
               usedBackend = "claude";
             }
           } catch (error) {
             if (canFallback) {
               log.warn(`Codex threw, falling back to Claude: ${error}`);
-              agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
+              agentResponse = await processWithClaude(messageText, msg.chatId);
               usedBackend = "claude";
             } else {
               agentResponse = "Error processing with Codex. Please try again.";
@@ -389,23 +375,20 @@ ${messageText}`;
           }
         } else {
           try {
-            agentResponse = await processWithClaude(enrichedMessage, msg.chatId);
+            agentResponse = await processWithClaude(messageText, msg.chatId);
             if (agentResponse.startsWith("Error:") && canFallback) {
               log.warn("Claude failed, falling back to Codex");
-              agentResponse = await processWithCodex(enrichedMessage);
+              agentResponse = await processWithCodex(messageText);
               usedBackend = "codex";
             }
             if (isClaudeRateLimitResponse(agentResponse) && canFallback) {
               log.warn("Claude credits exhausted, falling back to Codex");
-              const codexResponse = await processWithCodex(enrichedMessage);
+              const codexResponse = await processWithCodex(messageText);
               if (isCodexAuthRequiredResponse(codexResponse)) {
                 agentResponse = `${agentResponse}\n---CHUNK---\n${codexResponse}`;
               } else {
                 agentResponse = `Claude is out of credits right now, so I switched this reply to Codex.\n---CHUNK---\n${codexResponse}`;
-                historyResponse = codexResponse;
                 usedBackend = "codex";
-                // Persist the switch so subsequent messages don't keep re-injecting
-                // cross-backend context while Claude has no credits.
                 backendState.set(msg.chatId, "codex");
               }
             }
@@ -413,16 +396,13 @@ ${messageText}`;
             const errMsg = error instanceof Error ? error.message : String(error);
             if (canFallback) {
               log.warn(`Claude threw, falling back to Codex: ${errMsg}`);
-              agentResponse = await processWithCodex(enrichedMessage);
+              agentResponse = await processWithCodex(messageText);
               usedBackend = "codex";
             } else {
               agentResponse = `Claude error: ${errMsg.slice(0, 200)}`;
             }
           }
         }
-
-        // Log exchange for shared history
-        addExchange(msg.chatId, messageText, historyResponse ?? agentResponse, usedBackend);
 
         log.info(`Response | backend: ${usedBackend} | responseChars: ${agentResponse.length}`);
         log.debug(`Response raw >>>>\n${agentResponse}\n<<<<`);

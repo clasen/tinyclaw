@@ -12,7 +12,6 @@
  */
 
 import { selectModel } from "./router";
-import { getRecentHistory } from "./history";
 import { shouldContinue } from "./context";
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
@@ -127,12 +126,10 @@ async function processNext() {
 
 async function runClaude(message: string, chatId: string): Promise<string> {
   const model = selectModel(message);
-  const historyContext = getRecentHistory(chatId);
   const start = Date.now();
-  const prompt = withSoul(historyContext + message);
+  const prompt = withSoul(message);
 
-  const historyCount = historyContext ? historyContext.split("\nUser: ").length - 1 : 0;
-  log.info(`Model: ${model.model} (${model.reason}) | History: ${historyCount} exchanges`);
+  log.info(`Model: ${model.model} (${model.reason})`);
 
   const args = ["--dangerously-skip-permissions", "--output-format", "text"];
 
