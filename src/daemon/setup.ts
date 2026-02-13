@@ -268,12 +268,18 @@ async function checkCliAuth(inq: typeof import("@inquirer/prompts") | null, vars
 
 /**
  * Quick probe: is this CLI authenticated?
- * Claude: `claude auth status` exits 0 and contains "loggedIn": true
- * Codex: `codex auth status` or a quick exec check
+ * Claude: check CLAUDE_CODE_OAUTH_TOKEN env/.env, or `claude auth status`
+ * Codex: no simple auth check, assume OK if installed
  */
 async function isCliAuthenticated(cli: AgentCliName): Promise<boolean> {
   try {
     if (cli === "claude") {
+      // setup-token auth: token lives in env var (not .credentials.json)
+      if (process.env.CLAUDE_CODE_OAUTH_TOKEN?.startsWith("sk-ant-")) {
+        console.log(`[setup] claude auth via CLAUDE_CODE_OAUTH_TOKEN env var`);
+        return true;
+      }
+      // Native CLI auth: check `claude auth status`
       const cmd = buildBunWrappedAgentCliCommand("claude", ["auth", "status"], { skipPreload: true });
       const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
       const stdout = await new Response(proc.stdout).text();
@@ -314,8 +320,51 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
   console.log(`Starting ${cli} login...`);
 
   try {
-    // Let the CLI handle its own credential storage (credentials.json / keychain).
-    // Don't intercept stdout or save tokens to .env — the CLI manages refresh internally.
+    if (cli === "claude") {
+      // `claude setup-token` generates a long-lived (1 year) OAuth token for
+      // headless/CI environments. It prints the token to stdout but does NOT
+      // write .credentials.json. We must capture it and save to .env.
+      const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
+        stdin: "inherit",
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+
+      let output = "";
+      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        process.stdout.write(chunk);
+        output += chunk;
+      }
+
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) {
+        console.log(`  ✗ claude login failed (exit ${exitCode})`);
+        return false;
+      }
+
+      // Extract token from output (format: sk-ant-oat01-...)
+      const tokenMatch = output.match(/(sk-ant-oat01-[A-Za-z0-9_-]+)/);
+      if (tokenMatch) {
+        const token = tokenMatch[1];
+        console.log(`  [token] ${token.slice(0, 20)}...${token.slice(-6)} (${token.length} chars)`);
+        vars.CLAUDE_CODE_OAUTH_TOKEN = token;
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+        saveEnv(vars);
+        console.log("  ✓ token saved to .env");
+      } else {
+        console.log("  ⚠ could not extract token from output — set CLAUDE_CODE_OAUTH_TOKEN manually in ~/.arisa/.env");
+      }
+
+      console.log(`  ✓ claude login successful`);
+      return true;
+    }
+
+    // For codex and others: inherit all stdio
     const proc = Bun.spawn(buildBunWrappedAgentCliCommand(cli, args, { skipPreload: true }), {
       stdin: "inherit",
       stdout: "inherit",
@@ -325,16 +374,6 @@ async function runInteractiveLogin(cli: AgentCliName, vars: Record<string, strin
 
     if (exitCode === 0) {
       console.log(`  ✓ ${cli} login successful`);
-
-      // Clean up stale CLAUDE_CODE_OAUTH_TOKEN from .env if present —
-      // it overrides the CLI's own credential store and breaks token refresh.
-      if (cli === "claude" && vars.CLAUDE_CODE_OAUTH_TOKEN) {
-        delete vars.CLAUDE_CODE_OAUTH_TOKEN;
-        delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-        saveEnv(vars);
-        console.log("  ✓ removed stale CLAUDE_CODE_OAUTH_TOKEN from .env (CLI manages auth internally)");
-      }
-
       return true;
     } else {
       console.log(`  ✗ ${cli} login failed (exit ${exitCode})`);
