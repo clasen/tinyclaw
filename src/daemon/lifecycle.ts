@@ -15,8 +15,13 @@ import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { attemptAutoFix } from "./autofix";
 import { isRunningAsRoot } from "../shared/ai-cli";
+import { existsSync } from "fs";
 import { spawnSync } from "child_process";
 import { join } from "path";
+
+// Use --watch only in dev checkouts (has .git), not global installs on VPS.
+// --watch adds file system watchers that consume significant memory.
+const useWatch = existsSync(join(config.projectDir, ".git"));
 
 const log = createLogger("daemon");
 
@@ -125,6 +130,7 @@ export function startCore() {
   // When root, spawn Core as arisa user so Claude CLI calls work directly
   // (no su wrapper per invocation). su without "-" preserves parent env
   // (tokens, ARISA_DATA_DIR, API keys). We only override HOME/BUN/PATH.
+  const watchFlag = useWatch ? " --watch" : "";
   let cmd: string[];
   if (isRunningAsRoot()) {
     // Ensure arisa owns all data dir files created during Daemon init
@@ -132,13 +138,12 @@ export function startCore() {
     spawnSync("chown", ["-R", "arisa:arisa", config.arisaDir], { stdio: "ignore" });
 
     const bunEnv = "export HOME=/home/arisa && export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH";
-    const inner = `${bunEnv} && cd ${config.projectDir} && exec bun --watch ${coreEntry}`;
+    const inner = `${bunEnv} && cd ${config.projectDir} && exec bun${watchFlag} ${coreEntry}`;
     cmd = ["su", "arisa", "-s", "/bin/bash", "-c", inner];
-    log.info(`Starting Core as arisa user: bun --watch ${coreEntry}`);
   } else {
-    cmd = ["bun", "--watch", coreEntry];
-    log.info(`Starting Core: bun --watch ${coreEntry}`);
+    cmd = useWatch ? ["bun", "--watch", coreEntry] : ["bun", coreEntry];
   }
+  log.info(`Starting Core${isRunningAsRoot() ? " as arisa" : ""}${useWatch ? " (watch)" : ""}: ${coreEntry}`);
 
   if (crashCount > 3) {
     coreState = "down";
