@@ -533,16 +533,18 @@ switch (command) {
     if (isDefaultInvocation) {
       printForegroundNotice();
     }
-    const child = runWithBun([daemonEntry, ...rest]);
-    process.exit(child.status === null ? 1 : child.status);
+    // Run daemon in-process — avoids an extra bun child (~150MB saved)
+    await import(daemonEntry);
+    break;
   }
-  case "core":
-    {
-      const child = runWithBun([coreEntry, ...rest]);
-      process.exit(child.status === null ? 1 : child.status);
-    }
+  case "core": {
+    // Run core in-process
+    await import(coreEntry);
+    break;
+  }
   case "dev":
     {
+      // dev needs --watch which is a bun CLI flag, so child process required
       const child = runWithBun(["--watch", coreEntry, ...rest]);
       process.exit(child.status === null ? 1 : child.status);
     }
