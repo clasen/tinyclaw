@@ -1,6 +1,6 @@
 {
   "name": "arisa",
-  "version": "2.3.19",
+  "version": "2.3.20",
   "description": "Arisa - dynamic agent runtime with daemon/core architecture that evolves through user interaction",
   "keywords": [
     "tinyclaw",

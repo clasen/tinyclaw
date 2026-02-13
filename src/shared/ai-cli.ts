@@ -11,7 +11,6 @@ import { delimiter, dirname, join } from "path";
 export type AgentCliName = "claude" | "codex";
 
 const ARISA_USER_BUN = "/home/arisa/.bun/bin";
-const ARISA_INK_SHIM = "/home/arisa/.arisa-ink-shim.js";
 const ARISA_HOME = "/home/arisa";
 const ARISA_BUN_ENV = `export HOME=${ARISA_HOME} && export BUN_INSTALL=${ARISA_HOME}/.bun && export PATH=${ARISA_USER_BUN}:$PATH`;
 
@@ -97,10 +96,10 @@ function buildEnvExports(): string {
 
 export function buildBunWrappedAgentCliCommand(cli: AgentCliName, args: string[]): string[] {
   if (isRunningAsRoot()) {
-    // Run as arisa user — Claude CLI refuses to run as root
+    // Run as arisa user — Claude CLI refuses to run as root.
+    // This path is used by Daemon fallback calls; Core runs as arisa directly.
     const cliPath = resolveAgentCliPath(cli) || join(ARISA_USER_BUN, cli);
-    const shimPath = existsSync(ARISA_INK_SHIM) ? ARISA_INK_SHIM : INK_SHIM;
-    const inner = ["bun", "--bun", shimPath, cliPath, ...args].map(shellEscape).join(" ");
+    const inner = ["bun", "--bun", INK_SHIM, cliPath, ...args].map(shellEscape).join(" ");
     // su without "-" preserves parent env (tokens, keys); explicit HOME/PATH for arisa
     return ["su", "arisa", "-s", "/bin/bash", "-c", `${ARISA_BUN_ENV} && ${buildEnvExports()}${inner}`];
   }

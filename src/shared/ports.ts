@@ -4,7 +4,7 @@
  * @effects Reads/writes runtime pid files, kills processes via SIGKILL
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, mkdirSync, chmodSync } from "fs";
 import { join, dirname } from "path";
 import { dataDir } from "./paths";
 
@@ -99,7 +99,11 @@ export async function serveWithRetry(
 
   for (let i = 0; i < retries; i++) {
     try {
-      return Bun.serve(options);
+      const server = Bun.serve(options);
+      // Make Unix sockets world-accessible so Core (arisa) and Daemon (root)
+      // can connect to each other's sockets regardless of ownership.
+      if (socketPath) try { chmodSync(socketPath, 0o777); } catch {}
+      return server;
     } catch (e: any) {
       if (e?.code !== "EADDRINUSE" || i === retries - 1) throw e;
       if (socketPath) {

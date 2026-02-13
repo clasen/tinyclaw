@@ -14,6 +14,7 @@
 import { config } from "../shared/config";
 import { createLogger } from "../shared/logger";
 import { attemptAutoFix } from "./autofix";
+import { isRunningAsRoot } from "../shared/ai-cli";
 import { join } from "path";
 
 const log = createLogger("daemon");
@@ -119,7 +120,20 @@ export function startCore() {
   if (!shouldRun) return;
 
   const coreEntry = join(config.projectDir, "src", "core", "index.ts");
-  log.info(`Starting Core: bun --watch ${coreEntry}`);
+
+  // When root, spawn Core as arisa user so Claude CLI calls work directly
+  // (no su wrapper per invocation). su without "-" preserves parent env
+  // (tokens, ARISA_DATA_DIR, API keys). We only override HOME/BUN/PATH.
+  let cmd: string[];
+  if (isRunningAsRoot()) {
+    const bunEnv = "export HOME=/home/arisa && export BUN_INSTALL=/home/arisa/.bun && export PATH=/home/arisa/.bun/bin:$PATH";
+    const inner = `${bunEnv} && cd ${config.projectDir} && exec bun --watch ${coreEntry}`;
+    cmd = ["su", "arisa", "-s", "/bin/bash", "-c", inner];
+    log.info(`Starting Core as arisa user: bun --watch ${coreEntry}`);
+  } else {
+    cmd = ["bun", "--watch", coreEntry];
+    log.info(`Starting Core: bun --watch ${coreEntry}`);
+  }
 
   if (crashCount > 3) {
     coreState = "down";
@@ -149,7 +163,7 @@ export function startCore() {
     }, 3000);
   }
 
-  coreProcess = Bun.spawn(["bun", "--watch", coreEntry], {
+  coreProcess = Bun.spawn(cmd, {
     cwd: config.projectDir,
     stdout: "pipe",
     stderr: "pipe",

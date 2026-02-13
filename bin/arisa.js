@@ -3,6 +3,7 @@
 const { spawn, spawnSync } = require("node:child_process");
 const {
   closeSync,
+  cpSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -403,9 +404,9 @@ function printForegroundNotice() {
   process.stdout.write("Use `arisa start` to run it as a background service.\n");
 }
 
-// ── Root: create arisa user for claude/codex execution ──────────────
-// Daemon runs as root. Only claude/codex CLI calls run as user arisa
-// (Claude CLI refuses to run as root). This avoids two heavy bun processes.
+// ── Root: create arisa user for Core process execution ──────────────
+// Daemon runs as root. Core runs as user arisa (Claude CLI refuses root).
+// This means Claude/Codex calls from Core are direct — no su wrapping.
 
 function isRoot() {
   return process.getuid?.() === 0;
@@ -457,20 +458,42 @@ function provisionArisaUser() {
   }
   step(true, "Bun installed for arisa");
 
-  // 4. Write ink-shim for non-TTY execution (prevents Ink setRawMode crash)
-  const shimPath = "/home/arisa/.arisa-ink-shim.js";
-  writeFileSync(shimPath, 'if(process.stdin&&!process.stdin.isTTY){process.stdin.setRawMode=()=>process.stdin;process.stdin.isTTY=true;}\n');
-  spawnSync("chown", ["arisa:arisa", shimPath], { stdio: "ignore" });
-  step(true, "Ink shim installed");
-
-  process.stdout.write("  Done. Claude/Codex will run as user arisa.\n\n");
+  process.stdout.write("  Done. Core will run as arisa; Claude/Codex calls are direct.\n\n");
 }
 
 // Provision arisa user if running as root and not yet done
 if (isRoot() && !isArisaUserProvisioned()) {
   provisionArisaUser();
 }
-// Then fall through to normal daemon startup (as root)
+
+// When root + arisa exists: route all runtime data through arisa's home
+// so Core (running as arisa) and Daemon (root) share the same data dir.
+if (isRoot() && arisaUserExists()) {
+  const arisaDataDir = "/home/arisa/.arisa";
+  const rootDataDir = join("/root", ".arisa");
+
+  // One-time migration from root's data dir
+  if (existsSync(rootDataDir) && !existsSync(arisaDataDir)) {
+    try {
+      cpSync(rootDataDir, arisaDataDir, { recursive: true });
+      spawnSync("chown", ["-R", "arisa:arisa", arisaDataDir], { stdio: "ignore" });
+    } catch {}
+  }
+
+  // Ensure arisa data dir exists with correct ownership
+  if (!existsSync(arisaDataDir)) {
+    mkdirSync(arisaDataDir, { recursive: true });
+    spawnSync("chown", ["-R", "arisa:arisa", arisaDataDir], { stdio: "ignore" });
+  }
+
+  // Ensure arisa can read project files (Core runs as arisa with bun --watch)
+  spawnSync("chmod", ["-R", "o+rX", pkgRoot], { stdio: "ignore" });
+
+  // All processes use arisa's data dir (inherited by Daemon → Core)
+  process.env.ARISA_DATA_DIR = arisaDataDir;
+}
+
+// Then fall through to normal daemon startup
 
 // ── Non-root flow (unchanged) ───────────────────────────────────────
 
