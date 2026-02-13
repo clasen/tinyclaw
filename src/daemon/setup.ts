@@ -15,7 +15,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { dataDir } from "../shared/paths";
 import { secrets, setSecret } from "../shared/secrets";
-import { isAgentCliInstalled, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
+import { isAgentCliInstalled, isRunningAsRoot, buildBunWrappedAgentCliCommand, type AgentCliName } from "../shared/ai-cli";
 
 const ENV_PATH = join(dataDir, ".env");
 
@@ -140,20 +140,23 @@ export async function runSetup(): Promise<boolean> {
   }
 
   // ─── Phase 2: CLI Installation ──────────────────────────────────
+  // When running as root, bin/arisa.js pre-flight already handled CLI
+  // installation with the interactive checkbox before switching to arisa.
+  // This phase is only needed for direct (non-root) runs.
 
   if (process.stdin.isTTY) {
     let claudeInstalled = isAgentCliInstalled("claude");
     let codexInstalled = isAgentCliInstalled("codex");
-
-    console.log("\nCLI Status:");
-    console.log(`  ${claudeInstalled ? "✓" : "✗"} Claude${claudeInstalled ? "" : " — not installed"}`);
-    console.log(`  ${codexInstalled ? "✓" : "✗"} Codex${codexInstalled ? "" : " — not installed"}`);
 
     const missing: AgentCliName[] = [];
     if (!claudeInstalled) missing.push("claude");
     if (!codexInstalled) missing.push("codex");
 
     if (missing.length > 0) {
+      console.log("\nCLI Status:");
+      console.log(`  ${claudeInstalled ? "✓" : "✗"} Claude${claudeInstalled ? "" : " — not installed"}`);
+      console.log(`  ${codexInstalled ? "✓" : "✗"} Codex${codexInstalled ? "" : " — not installed"}`);
+
       let toInstall: AgentCliName[] = [];
 
       if (inq) {
@@ -249,11 +252,20 @@ async function isCliAuthenticated(cli: AgentCliName): Promise<boolean> {
 
 async function installCli(cli: AgentCliName): Promise<boolean> {
   try {
-    // Install into root's bun (arisa has read+execute access)
     const cmd = ["bun", "add", "-g", CLI_PACKAGES[cli]];
+    const env = { ...process.env };
+
+    // When not root, BUN_INSTALL may point to root's dir (read-only for us).
+    // Install to user's own bun dir instead.
+    if (!isRunningAsRoot()) {
+      const home = process.env.HOME || "/home/arisa";
+      env.BUN_INSTALL = `${home}/.bun`;
+    }
+
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
       stderr: "inherit",
+      env,
     });
     const timeout = setTimeout(() => proc.kill(), 180_000);
     const exitCode = await proc.exited;

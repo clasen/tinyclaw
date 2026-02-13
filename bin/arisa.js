@@ -499,6 +499,89 @@ if (isRoot() && arisaUserExists()) {
   process.umask(0o000);
 }
 
+// Pre-flight: install missing CLIs while still root (before su arisa).
+// arisa user has read+execute but NOT write access to root's bun dir.
+// Uses @inquirer/prompts checkbox when available (same UI as setup.ts).
+async function preflightInstallClis() {
+  const clis = {
+    claude: "@anthropic-ai/claude-code",
+    codex: "@openai/codex",
+  };
+
+  const bunBinDir = join(ROOT_BUN_INSTALL, "bin");
+  const missing = [];
+
+  for (const [name, pkg] of Object.entries(clis)) {
+    if (existsSync(join(bunBinDir, name))) continue;
+    missing.push({ name, pkg });
+  }
+
+  if (missing.length === 0) return;
+
+  // Show status
+  process.stdout.write("\nCLI Status:\n");
+  for (const name of Object.keys(clis)) {
+    const installed = existsSync(join(bunBinDir, name));
+    const label = name === "claude" ? "Claude" : "Codex";
+    process.stdout.write(`  ${installed ? "\u2713" : "\u2717"} ${label}${installed ? "" : " \u2014 not installed"}\n`);
+  }
+
+  let toInstall = missing;
+
+  if (process.stdin.isTTY) {
+    // Try @inquirer/prompts for the same checkbox UI as setup.ts
+    let inq = null;
+    try { inq = await import("@inquirer/prompts"); } catch {}
+
+    if (inq) {
+      const selected = await inq.checkbox({
+        message: "Install missing CLIs? (space to select, enter to confirm)",
+        choices: missing.map((cli) => ({
+          name: `${cli.name === "claude" ? "Claude" : "Codex"} (${cli.pkg})`,
+          value: cli,
+          checked: true,
+        })),
+      });
+      toInstall = selected;
+    } else {
+      // Fallback: simple Y/n
+      const rl = require("node:readline");
+      const ask = (q) =>
+        new Promise((resolve) => {
+          const iface = rl.createInterface({ input: process.stdin, output: process.stdout });
+          iface.question(q, (a) => { iface.close(); resolve(a.trim()); });
+        });
+      const answer = await ask("\nInstall missing CLIs? (Y/n): ");
+      if (answer.toLowerCase() === "n") toInstall = [];
+    }
+  }
+
+  if (toInstall.length === 0) {
+    process.stdout.write("  Skipping CLI installation.\n");
+    return;
+  }
+
+  for (const { name, pkg } of toInstall) {
+    process.stdout.write(`\nInstalling ${name}...\n`);
+    const result = spawnSync("bun", ["add", "-g", pkg], {
+      stdio: "inherit",
+      timeout: 180000,
+    });
+    if (result.status === 0) {
+      process.stdout.write(`  \u2713 ${name} installed\n`);
+    } else {
+      process.stdout.write(`  \u2717 ${name} install failed\n`);
+    }
+  }
+
+  // Re-grant read+execute access after installing new binaries
+  grantBunAccess();
+}
+
+if (isRoot() && arisaUserExists()) {
+  await preflightInstallClis();
+}
+
 // Then fall through to normal daemon startup
 
 // ── Non-root flow (unchanged) ───────────────────────────────────────

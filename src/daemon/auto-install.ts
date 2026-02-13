@@ -33,13 +33,20 @@ async function installCli(cli: AgentCliName): Promise<boolean> {
   log.info(`Auto-install: installing ${cli} (${pkg})...`);
 
   try {
-    // Install into root's bun (arisa has read+execute access)
     const cmd = ["bun", "add", "-g", pkg];
+    const env = { ...process.env };
+
+    // When not root, BUN_INSTALL may point to root's dir (read-only for us).
+    // Install to user's own bun dir instead.
+    if (!isRunningAsRoot()) {
+      const home = process.env.HOME || "/home/arisa";
+      env.BUN_INSTALL = `${home}/.bun`;
+    }
 
     const proc = Bun.spawn(cmd, {
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env,
     });
 
     const timeout = setTimeout(() => proc.kill(), INSTALL_TIMEOUT);
@@ -69,10 +76,7 @@ export async function autoInstallMissingClis(): Promise<void> {
     }
   }
 
-  if (missing.length === 0) {
-    log.info("Auto-install: all CLIs already installed");
-    return;
-  }
+  if (missing.length === 0) return;
 
   log.info(`Auto-install: missing CLIs: ${missing.join(", ")}`);
 

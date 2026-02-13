@@ -41,11 +41,13 @@ function cliOverrideEnvVar(cli: AgentCliName): string | undefined {
 }
 
 function candidatePaths(cli: AgentCliName): string[] {
+  const arisaBunBin = `${ARISA_HOME}/.bun/bin`;
+
   if (isRunningAsRoot()) {
-    // When root, CLIs are installed under arisa user's bun
     return unique([
       cliOverrideEnvVar(cli),
       join(ROOT_BUN_BIN, cli),
+      join(arisaBunBin, cli),
     ]);
   }
 
@@ -61,6 +63,7 @@ function candidatePaths(cli: AgentCliName): string[] {
   return unique([
     cliOverrideEnvVar(cli),
     bunInstall ? join(bunInstall, "bin", cli) : null,
+    join(arisaBunBin, cli),
     join(bunDir, cli),
     fromPath,
     ...fromEnvPath,

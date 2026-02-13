@@ -16,7 +16,7 @@ function printable(cmd: string[]): string {
 }
 
 const probeArgs = ["-p", "say ok", "--model", "haiku", "--output-format", "text", "--dangerously-skip-permissions"];
-const processorArgs = ["--dangerously-skip-permissions", "--output-format", "text", "--model", "claude-sonnet-4-20250514", "-p", "hello test"];
+const processorArgs = ["--dangerously-skip-permissions", "--output-format", "text", "--model", "sonnet", "-p", "hello test"];
 
 console.log("=== AUTH PROBE (daemon/auto-install.ts) ===\n");
 console.log(printable(buildBunWrappedAgentCliCommand("claude", probeArgs)));
