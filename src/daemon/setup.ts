@@ -289,7 +289,10 @@ async function isCliAuthenticated(cli: AgentCliName): Promise<boolean> {
       const exitCode = await proc.exited;
       return exitCode === 0 && stdout.includes('"loggedIn": true');
     }
-    // Codex: no simple auth check, assume OK if installed
+    // Codex: needs OPENAI_API_KEY
+    if (cli === "codex") {
+      return !!(process.env.OPENAI_API_KEY);
+    }
     return true;
   } catch {
     return false;
