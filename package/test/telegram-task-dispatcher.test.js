@@ -110,7 +110,6 @@ test("runs poll tools headlessly and confirms their result", async () => {
   });
 
   assert.deepEqual(calls, [
-    ["runTurn", { priority: "background", label: "poll tool checker" }],
     ["runTool", { name: "checker", request: { args: { cursor: "4" } }, chatId: 123 }],
     ["complete", "poll-1"]
   ]);
@@ -194,8 +193,7 @@ test("probes a blocked agent task before starting another reasoning turn", async
     payload: { chatId: 123, prompt: "run harvest" }
   });
 
-  assert.deepEqual(calls[0], ["runTurn", { priority: "background", label: "authentication probe creator-scout" }]);
-  assert.deepEqual(calls[1], ["runTool", {
+  assert.deepEqual(calls[0], ["runTool", {
     name: "creator-scout",
     request: { args: { action: "status" } },
     chatId: 123
@@ -335,9 +333,8 @@ test("due-task dispatch retries one failure without blocking another task", asyn
 
   await dispatcher.dispatchDueTasks();
 
-  assert.deepEqual(calls.slice(0, 3), [
+  assert.deepEqual(calls.slice(0, 2), [
     ["claimDue", 10],
-    ["runTurn", { priority: "background", label: "poll tool checker" }],
     ["runTool", { name: "checker", request: { args: {} }, chatId: 123 }]
   ]);
   assert.ok(calls.some((call) => JSON.stringify(call) === JSON.stringify(["complete", "good"])));

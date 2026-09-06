@@ -40,6 +40,7 @@ test("merges partial exclusive turn coordinator overrides with defaults", () => 
     enabled: true,
     backgroundQueueTtlMs: 30_000,
     interactiveQueueTtlMs: 0,
+    interactiveQuietMs: 2_000,
     maxQueued: 100
   });
 });

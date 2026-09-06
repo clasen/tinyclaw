@@ -72,10 +72,11 @@ export function createTelegramTaskDispatcher({
   const agentTimeoutMs = boundedTimeout(taskTimeouts.agentTimeoutMs, 15 * 60_000);
   const eventTimeoutMs = boundedTimeout(taskTimeouts.eventTimeoutMs, 5 * 60_000);
 
-  const runBackgroundTool = (toolName, chatId, args, label) => agentManager.runTurn({
-    priority: "background",
-    label
-  }, () => agentManager.runTool({ name: toolName, request: { args }, chatId }));
+  const runHeadlessTool = (toolName, chatId, args) => agentManager.runTool({
+    name: toolName,
+    request: { args },
+    chatId
+  });
 
   function throwToolFailure(result, toolName, fallbackResolution) {
     const error = new Error(result?.error || `${toolName} failed`);
@@ -98,11 +99,10 @@ export function createTelegramTaskDispatcher({
   async function dispatchAgentTask(task, chatId) {
     if (!task.payload.prompt) throw new NonRetryableTaskError("agent_task missing prompt");
     if (task.authBlock?.toolName) {
-      const probe = await runBackgroundTool(
+      const probe = await runHeadlessTool(
         task.authBlock.toolName,
         chatId,
-        task.authBlock.probeArgs || {},
-        `authentication probe ${task.authBlock.toolName}`
+        task.authBlock.probeArgs || {}
       );
       if (probe?.ok === false) throwToolFailure(probe, task.authBlock.toolName, task.authBlock);
       logger?.log("tasks", `authentication restored for ${task.authBlock.toolName} (task ${task.id})`);
@@ -156,7 +156,7 @@ export function createTelegramTaskDispatcher({
     if (!toolName) throw new NonRetryableTaskError("poll_tool missing toolName");
     logger?.log("tasks", `polling tool ${toolName} (task ${task.id}) for chat ${chatId}`);
 
-    const runTool = (args) => runBackgroundTool(toolName, chatId, args, `poll tool ${toolName}`);
+    const runTool = (args) => runHeadlessTool(toolName, chatId, args);
 
     if (task.authBlock) {
       const probe = await runTool(task.authBlock.probeArgs || {});

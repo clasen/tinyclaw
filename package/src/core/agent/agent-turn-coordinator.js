@@ -30,6 +30,12 @@ export class AgentTurnCoordinator {
     this.expired = 0;
     this.maxObservedQueue = 0;
     this.totalWaitMs = 0;
+    this.lastInteractiveActivityAt = 0;
+    this.backgroundWakeTimer = null;
+    this.priorityStats = {
+      interactive: { queued: 0, started: 0, completed: 0, expired: 0, totalWaitMs: 0, maxWaitMs: 0 },
+      background: { queued: 0, started: 0, completed: 0, expired: 0, totalWaitMs: 0, maxWaitMs: 0 }
+    };
     this.setConfig(config);
   }
 
@@ -38,6 +44,7 @@ export class AgentTurnCoordinator {
       enabled: config.enabled !== false,
       backgroundQueueTtlMs: positiveInteger(config.backgroundQueueTtlMs, 10 * 60_000, 60 * 60_000),
       interactiveQueueTtlMs: positiveInteger(config.interactiveQueueTtlMs, 0, 60 * 60_000),
+      interactiveQuietMs: positiveInteger(config.interactiveQuietMs, 0, 60_000),
       maxQueued: Math.max(1, positiveInteger(config.maxQueued, 100, 1_000))
     };
   }
@@ -53,14 +60,24 @@ export class AgentTurnCoordinator {
   }
 
   diagnostic() {
+    const priorities = Object.fromEntries(Object.entries(this.priorityStats).map(([name, stats]) => [name, {
+      queued: stats.queued,
+      started: stats.started,
+      completed: stats.completed,
+      expired: stats.expired,
+      averageWaitMs: stats.started ? Math.round(stats.totalWaitMs / stats.started) : 0,
+      maxWaitMs: stats.maxWaitMs
+    }]));
     return {
       enabled: this.config.enabled,
       active: this.describeActive(this.active),
       queued: this.queue.length,
+      queuedInteractive: this.queue.filter((entry) => entry.priorityName === "interactive").length,
       maxObservedQueue: this.maxObservedQueue,
       completed: this.completed,
       expired: this.expired,
-      averageWaitMs: this.completed ? Math.round(this.totalWaitMs / this.completed) : 0
+      averageWaitMs: this.completed ? Math.round(this.totalWaitMs / this.completed) : 0,
+      priorities
     };
   }
 
@@ -69,14 +86,42 @@ export class AgentTurnCoordinator {
     if (index >= 0) this.queue.splice(index, 1);
   }
 
+  clearBackgroundWake() {
+    if (!this.backgroundWakeTimer) return;
+    clearTimeout(this.backgroundWakeTimer);
+    this.backgroundWakeTimer = null;
+  }
+
+  deferBackground(delayMs) {
+    if (this.backgroundWakeTimer) return;
+    this.backgroundWakeTimer = setTimeout(() => {
+      this.backgroundWakeTimer = null;
+      this.next();
+    }, delayMs);
+    this.backgroundWakeTimer.unref?.();
+  }
+
   next() {
     if (this.active || this.closed || !this.queue.length) return;
     this.queue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence);
-    const entry = this.queue.shift();
+    const entry = this.queue[0];
+    if (entry.priorityName === "background") {
+      const quietRemainingMs = this.lastInteractiveActivityAt + this.config.interactiveQuietMs - this.now();
+      if (quietRemainingMs > 0) {
+        this.deferBackground(quietRemainingMs);
+        return;
+      }
+    }
+    this.clearBackgroundWake();
+    this.queue.shift();
     if (entry.timer) clearTimeout(entry.timer);
     entry.startedAt = new Date(this.now()).toISOString();
     this.active = entry;
     const waitMs = Math.max(0, this.now() - entry.queuedAt);
+    const stats = this.priorityStats[entry.priorityName];
+    stats.started += 1;
+    stats.totalWaitMs += waitMs;
+    stats.maxWaitMs = Math.max(stats.maxWaitMs, waitMs);
     this.totalWaitMs += waitMs;
     if (waitMs > 0) this.logger?.log("agent", `${entry.label} waited ${waitMs}ms for exclusive agent execution`);
     let released = false;
@@ -85,6 +130,8 @@ export class AgentTurnCoordinator {
       released = true;
       if (this.active === entry) this.active = null;
       this.completed += 1;
+      stats.completed += 1;
+      if (entry.priorityName === "interactive") this.lastInteractiveActivityAt = this.now();
       queueMicrotask(() => this.next());
     });
   }
@@ -96,11 +143,12 @@ export class AgentTurnCoordinator {
       return Promise.reject(Object.assign(new Error("Agent turn queue is full."), { code: "AGENT_TURN_QUEUE_FULL", retryable: true }));
     }
     const priority = normalizedPriority(priorityName);
+    const normalizedPriorityName = priorityName === "interactive" ? "interactive" : "background";
     const ttlMs = this.queueTtlMs(priorityName, queueTtlMs);
     return new Promise((resolve, reject) => {
       const entry = {
         label: String(label || "Agent turn").slice(0, 160),
-        priorityName: priorityName === "interactive" ? "interactive" : "background",
+        priorityName: normalizedPriorityName,
         priority,
         sequence: this.sequence += 1,
         queuedAt: this.now(),
@@ -114,11 +162,18 @@ export class AgentTurnCoordinator {
           if (this.active === entry) return;
           this.remove(entry);
           this.expired += 1;
+          this.priorityStats[entry.priorityName].expired += 1;
           reject(queueExpiredError(entry.label));
+          queueMicrotask(() => this.next());
         }, ttlMs);
         entry.timer.unref?.();
       }
       this.queue.push(entry);
+      this.priorityStats[entry.priorityName].queued += 1;
+      if (entry.priorityName === "interactive") {
+        this.lastInteractiveActivityAt = this.now();
+        this.clearBackgroundWake();
+      }
       this.maxObservedQueue = Math.max(this.maxObservedQueue, this.queue.length);
       this.next();
     });
@@ -135,6 +190,7 @@ export class AgentTurnCoordinator {
 
   close() {
     this.closed = true;
+    this.clearBackgroundWake();
     for (const entry of this.queue.splice(0)) {
       if (entry.timer) clearTimeout(entry.timer);
       entry.reject(Object.assign(new Error("Agent turn coordinator closed before execution."), { retryable: true }));

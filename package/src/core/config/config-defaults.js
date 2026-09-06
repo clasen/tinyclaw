@@ -97,6 +97,7 @@ export const piConfigDefaults = Object.freeze({
     enabled: true,
     backgroundQueueTtlMs: 10 * 60_000,
     interactiveQueueTtlMs: 0,
+    interactiveQuietMs: 2_000,
     maxQueued: 100
   }),
   compaction: Object.freeze({
